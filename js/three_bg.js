@@ -86,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const linesMaterial = new THREE.LineBasicMaterial({
         color: 0xFF8F00,
         transparent: true,
-        opacity: 0.15,
+        opacity: 0.20,
         blending: THREE.AdditiveBlending
     });
 

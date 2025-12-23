@@ -2,6 +2,9 @@
 // เริ่ม Session เพื่อรับข้อมูลที่ส่งมาจากการบันทึก (Flash Message)
 session_start();
 
+// ตั้งค่า Timezone เป็นประเทศไทย
+date_default_timezone_set('Asia/Bangkok');
+
 // กำหนดค่าการเชื่อมต่อฐานข้อมูล
 $servername = "localhost";
 $username = "root";
@@ -49,6 +52,59 @@ if ($conn && $connection_error === null) {
         while ($row = $result_promo->fetch_assoc()) {
             $promotions[] = $row;
         }
+    }
+}
+
+// --- FETCH STORE HOURS ---
+$store_open_time = '11:00';
+$store_close_time = '22:00';
+$store_status = 'OPEN'; // Manual override status
+
+if ($conn && $connection_error === null) {
+    $sql_hours = "SELECT setting_key, setting_value FROM store_settings WHERE setting_key IN ('store_open_time', 'store_close_time', 'store_status')";
+    $result_hours = $conn->query($sql_hours);
+    if ($result_hours) {
+        while ($row = $result_hours->fetch_assoc()) {
+            if ($row['setting_key'] === 'store_open_time') {
+                $store_open_time = $row['setting_value'];
+            } elseif ($row['setting_key'] === 'store_close_time') {
+                $store_close_time = $row['setting_value'];
+            } elseif ($row['setting_key'] === 'store_status') {
+                $store_status = $row['setting_value'];
+            }
+        }
+    }
+}
+
+// --- CHECK IF STORE IS OPEN ---
+$current_time = date('H:i');
+$is_store_open = false;
+$store_status_text = 'ร้านปิดอยู่';
+$store_status_icon = '🔴';
+$store_status_color = 'bg-red-500';
+$show_hours = false; // Control hours visibility
+
+// Check manual status first
+if ($store_status === 'CLOSED') {
+    // Manually closed - show closed status, hide hours
+    $is_store_open = false;
+    $store_status_text = 'ร้านปิดอยู่';
+    $store_status_icon = '🔴';
+   $store_status_color = 'bg-red-500';
+    $show_hours = false;
+} elseif ($store_status === 'OPEN') {
+    // Manually open - check time to determine status and show hours
+    $show_hours = true;
+    if ($current_time >= $store_open_time && $current_time <= $store_close_time) {
+        $is_store_open = true;
+        $store_status_text = 'ร้านเปิดอยู่';
+        $store_status_icon = '🟢';
+        $store_status_color = 'bg-green-500';
+    } else {
+        $is_store_open = false;
+        $store_status_text = 'ร้านปิดอยู่';
+        $store_status_icon = '🔴';
+        $store_status_color = 'bg-red-500';
     }
 }
 
@@ -104,20 +160,34 @@ function categorizeProduct($productName)
 
 $category_order = ['ซาชิมิ & นิกิริ', 'มากิ & โรล', 'เมนูทอด & เมนูร้อน', 'เครื่องดื่ม & ของหวาน', 'เมนูอื่น ๆ'];
 $grouped_products = [];
+
+// --- FETCH STORE LOCATION ---
+$store_lat = 13.73972299;
+$store_lng = 100.48529231;
+$store_address = 'ซูชิละกัน Paradise';
+if ($conn && $connection_error === null) {
+    $result_loc = $conn->query("SELECT latitude, longitude, address FROM store_locations LIMIT 1");
+    if ($result_loc && $row_loc = $result_loc->fetch_assoc()) {
+        $store_lat = $row_loc['latitude'];
+        $store_lng = $row_loc['longitude'];
+        $store_address = $row_loc['address'];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="th" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🍣 มารุซูชิ | ร้านซูชิพรีเมียม</title>
+    <link rel="icon" type="image/png" href="icon/icons.png?v=4">
+    <title>🍣 ซูชิละกัน | ร้านซูชิพรีเมียม</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             theme: {
-                extend: {Z
+                extend: {
                     colors: {
                         'orange': {
                             50: '#FFF8F0',
@@ -158,9 +228,31 @@ $grouped_products = [];
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=Prompt:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 
+    <!-- Leaflet CSS & Routing -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+
     <!-- Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="js/three_bg.js"></script>
+
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+            z-index: 10;
+        }
+        .leaflet-routing-container {
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            border-radius: 1rem;
+            border: none;
+            padding: 1rem;
+            font-family: 'Sarabun', sans-serif;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
 
     <style>
         /* Scrollbar */
@@ -297,7 +389,7 @@ Z
             <div class="w-24 h-24 rounded-full border-4 border-white/30 border-t-white animate-spin"></div>
             <div class="absolute inset-0 flex items-center justify-center text-5xl animate-bounce-slow">🍣</div>
         </div>
-        <p class="mt-8 text-white font-display text-2xl font-bold tracking-wider drop-shadow-lg">มารุซูชิ</p>
+        <p class="mt-8 text-white font-display text-2xl font-bold tracking-wider drop-shadow-lg">ซูชิละกัน</p>
         <p class="text-white/80 text-lg mt-2">🔥 กำลังเตรียมความอร่อย...</p>
     </div>
 
@@ -317,7 +409,7 @@ Z
             <a href="#" class="flex items-center gap-3 group">
                 <span class="text-4xl group-hover:animate-bounce transition-transform">🍣</span>
                 <div class="hidden md:block">
-                    <span class="text-2xl font-display font-extrabold text-gradient-orange">มารุซูชิ</span>
+                    <span class="text-2xl font-display font-extrabold text-gradient-orange">ซูชิละกัน</span>
                     <span class="text-xs text-orange-600 block -mt-1 font-semibold">SUSHI PARADISE</span>
                 </div>
             </a>
@@ -343,7 +435,6 @@ Z
         <div id="mobile-menu" class="hidden md:hidden bg-white border-t border-orange-100 p-6 flex flex-col gap-4 font-display font-bold text-center shadow-lg">
             <a href="#home" class="py-3 text-orange-700 hover:text-orange-500 rounded-xl hover:bg-orange-50">🏠 หน้าแรก</a>
             <a href="#menu" class="py-3 text-orange-700 hover:text-orange-500 rounded-xl hover:bg-orange-50">🍱 เมนู</a>
-            <a href="game" class="py-3 text-orange-700 hover:text-orange-500 rounded-xl hover:bg-orange-50">🎮 เกมส์</a>
             <a href="formlogin" class="btn-orange-gradient text-white py-4 rounded-2xl mt-2">💎 รับโค้ดส่วนลด</a>
         </div>
     </header>
@@ -363,7 +454,7 @@ Z
             </div>
             
             <h1 class="text-5xl md:text-7xl lg:text-8xl font-display font-extrabold mb-6 leading-tight">
-                <span class="text-gradient-orange">มารุซูชิ</span><br>
+                <span class="text-orange-600">ซูชิละกัน</span><br>
                 <span class="text-orange-800">SUSHI PARADISE</span>
             </h1>
             
@@ -407,12 +498,89 @@ Z
                 </a>
             </div>
 
-            <!-- Hours -->
-            <div class="mt-10 inline-flex items-center gap-3 bg-white/80 backdrop-blur-sm px-8 py-4 rounded-full border border-orange-200 shadow-sm">
-                <i class="fas fa-clock text-orange-500 text-xl"></i>
-                <span class="text-orange-800 font-display font-semibold">เปิดทุกวัน: <span class="text-orange-600 font-bold">11:00 - 22:00 น.</span></span>
+            <!-- Hours & Status -->
+            <div class="mt-10 flex flex-col items-center gap-4">
+                <!-- Store Status -->
+                <div class="inline-flex items-center gap-3 px-6 py-3 rounded-full <?php echo $is_store_open ? 'bg-green-500' : 'bg-red-500'; ?> shadow-lg animate-pulse-slow">
+                    <span class="text-2xl"><?php echo $store_status_icon; ?></span>
+                    <span class="text-white font-display font-bold text-lg"><?php echo $store_status_text; ?></span>
+                </div>
+                
+                <!-- Store Hours (only show when not manually closed) -->
+                <?php if ($show_hours): ?>
+                <div class="inline-flex items-center gap-3 bg-white/80 backdrop-blur-sm px-8 py-4 rounded-full border border-orange-200 shadow-sm">
+                    <i class="fas fa-clock text-orange-500 text-xl"></i>
+                    <span class="text-orange-800 font-display font-semibold">เปิดทุกวัน: <span class="text-orange-600 font-bold"><?php echo htmlspecialchars($store_open_time); ?> - <?php echo htmlspecialchars($store_close_time); ?> น.</span></span>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
+    </section>
+
+    <!-- 🎬 VIDEO SHOWCASE SECTION -->
+    <section class="relative py-20 overflow-hidden">
+        <div class="container mx-auto px-6">
+            <div class="text-center mb-12">
+                <div class="inline-block bg-orange-100 text-orange-600 px-4 py-1 rounded-full text-sm font-bold mb-3 animate-pulse-slow">
+                    🎬 VIDEO SHOWCASE
+                </div>
+                <h2 class="text-4xl md:text-5xl font-display font-extrabold text-orange-800 mb-4">
+                    ชมบรรยากาศซูชิสุดพรีเมียม
+                </h2>
+                <div class="w-32 h-1.5 bg-gradient-to-r from-orange-400 to-orange-600 mx-auto rounded-full"></div>
+            </div>
+
+            <div class="max-w-5xl mx-auto">
+                <div class="relative rounded-3xl overflow-hidden shadow-2xl border-4 border-orange-200 group">
+                    <!-- Video -->
+                    <video 
+                        id="sushiVideo"
+                        class="w-full h-auto object-cover"
+                        autoplay 
+                        loop 
+                        muted 
+                        playsinline
+                        poster="video/Sushi.mp4"
+                    >
+                        <source src="video/Sushi.mp4" type="video/mp4">
+                        เบราว์เซอร์ของคุณไม่รองรับการเล่นวิดีโอ
+                    </video>
+                    
+                    <!-- Overlay Gradient -->
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    
+                    <!-- Floating Badge -->
+                    <div class="absolute top-6 right-6 bg-gradient-to-r from-orange-500 to-orange-600 text-white px-6 py-3 rounded-full font-display font-bold shadow-lg backdrop-blur-sm flex items-center gap-2">
+                        <i class="fas fa-play-circle animate-pulse"></i>
+                        <span>AUTO PLAY</span>
+                    </div>
+
+                    <!-- Mute/Unmute Button -->
+                    <button 
+                        id="muteBtn"
+                        onclick="toggleMute()"
+                        class="absolute bottom-6 right-6 w-14 h-14 bg-white/90 backdrop-blur-sm text-orange-600 rounded-full shadow-lg hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center group/btn hover:scale-110"
+                        title="เปิด/ปิดเสียง"
+                    >
+                        <i id="muteIcon" class="fas fa-volume-mute text-xl"></i>
+                    </button>
+                </div>
+
+                <!-- Caption -->
+                <div class="mt-8 text-center glass-orange rounded-2xl p-6 max-w-2xl mx-auto">
+                    <p class="text-orange-700 font-display text-lg leading-relaxed">
+                        <i class="fas fa-quote-left text-orange-400 mr-2"></i>
+                        <span class="font-semibold">เห็นแล้วหิว! </span>
+                        ชมวิดีโอซูชิสดใหม่ทำสดใหม่ทุกวัน จากมือเชฟมืออาชีพ 
+                        <i class="fas fa-quote-right text-orange-400 ml-2"></i>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Decorative Elements -->
+        <div class="absolute -bottom-10 -left-10 w-40 h-40 bg-orange-200 rounded-full blur-3xl opacity-30"></div>
+        <div class="absolute -top-10 -right-10 w-40 h-40 bg-orange-300 rounded-full blur-3xl opacity-30"></div>
     </section>
 
     <!-- 🔥 PROMOTIONS SECTION -->
@@ -607,14 +775,34 @@ Z
     </section>
 
     <!-- 🗺️ CONTACT / MAP -->
-    <section id="contact" class="py-16 text-center">
-        <button onclick="document.querySelector('.map-container').classList.toggle('hidden')"
-            class="bg-white border-2 border-orange-400 text-orange-600 px-10 py-4 rounded-full font-display font-bold hover:bg-orange-50 hover:scale-105 transition-all inline-flex items-center gap-3 shadow-lg">
-            <i class="fas fa-map-marked-alt text-xl"></i> 📍 แสดงแผนที่ร้าน
+    <section id="contact" class="py-16 text-center container mx-auto px-6">
+        <div class="mb-10">
+            <div class="inline-block bg-orange-100 text-orange-600 px-4 py-1 rounded-full text-sm font-bold mb-3">📍 FIND US</div>
+            <h2 class="text-3xl md:text-4xl font-display font-extrabold text-orange-800 mb-2">ที่ตั้งและเส้นทางมาร้าน</h2>
+            <p class="text-orange-600">เดินทางมาหาเราได้ง่ายๆ ด้วยระบบนำทางด้านล่าง</p>
+        </div>
+
+        <button onclick="toggleRouteMap()" id="btn-toggle-map"
+            class="bg-white border-2 border-orange-400 text-orange-600 px-10 py-4 rounded-full font-display font-bold hover:bg-orange-50 hover:scale-105 transition-all inline-flex items-center gap-3 shadow-lg mb-8">
+            <i class="fas fa-location-arrow text-xl" id="toggle-icon"></i> <span id="toggle-text">ดูเส้นทางจากตำแหน่งของคุณ</span>
         </button>
-        <div class="map-container hidden max-w-4xl mx-auto mt-10 rounded-3xl overflow-hidden shadow-2xl border-4 border-orange-200">
-            <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3875.647551978255!2d100.4852923148296!3d13.73972299035656!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x30e299a4e377f0a1%3A0xc3012001556041!2sDelizio%20Restaurant!5e0!3m2!1sen!2sth!4v1620000000000!5m2!1sen!2sth"
-                width="100%" height="450" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+
+        <div id="map-section" class="max-w-5xl mx-auto rounded-3xl overflow-hidden shadow-2xl border-4 border-orange-200 relative hidden mb-8">
+            <div id="map"></div>
+            <div id="loading-map" class="absolute inset-0 bg-white/80 z-20 flex flex-col items-center justify-center">
+                <div class="w-12 h-12 border-4 border-orange-500 border-t-transparent animate-spin rounded-full mb-4"></div>
+                <p class="font-display font-bold text-orange-600">กำลังคำนวณเส้นทางจากตำแหน่งของคุณ...</p>
+            </div>
+        </div>
+
+        <div class="mt-8 glass-orange p-6 rounded-2xl max-w-2xl mx-auto flex items-center justify-center gap-4 border border-orange-200 shadow-sm">
+            <div class="w-12 h-12 bg-orange-500 text-white rounded-xl flex items-center justify-center text-xl">
+                <i class="fas fa-map-marker-alt"></i>
+            </div>
+            <div class="text-left">
+                <p class="text-sm text-orange-500 font-bold uppercase tracking-wider">ที่อยู่ร้าน</p>
+                <p class="text-orange-800 font-display font-semibold"><?php echo htmlspecialchars($store_address); ?></p>
+            </div>
         </div>
     </section>
 
@@ -622,16 +810,15 @@ Z
     <footer class="bg-gradient-to-r from-orange-500 to-orange-600 py-16 mt-auto">
         <div class="container mx-auto px-6 text-center text-white">
             <div class="text-6xl mb-6">🍣</div>
-            <h2 class="text-3xl font-display font-bold mb-4">มารุซูชิ PARADISE</h2>
-            <p class="text-white/80 mb-8 max-w-md mx-auto">Premium Japanese Restaurant<br>อร่อย สด สะอาด ต้องที่มารุซูชิ 🍣</p>
+            <h2 class="text-3xl font-display font-bold mb-4">ซูชิละกัน PARADISE</h2>
+            <p class="text-white/80 mb-8 max-w-md mx-auto">Premium Japanese Restaurant<br>อร่อย สด สะอาด ต้องที่ซูชิละกัน 🍣</p>
             
             <div class="flex justify-center gap-5 mb-10">
-                <a href="https://www.facebook.com/profile.php?id=61584831128985" class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i class="fab fa-facebook-f"></i></a>
-                <a href="#" class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i class="fab fa-instagram"></i></a>
-                <a href="#" class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i class="fab fa-line"></i></a>
+                <a href="https://www.facebook.com/share/1Bod121vTg/" class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i class="fab fa-facebook-f"></i></a>
+                <a href="line-oa" class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i class="fab fa-line"></i></a>
             </div>
 
-            <p class="text-white/60 text-sm">© 2024 มารุซูชิ Paradise. All Rights Reserved.</p>
+            <p class="text-white/60 text-sm">© 2026 ซูชิละกัน Paradise. All Rights Reserved.</p>
             <a href="formmenu" class="inline-block mt-4 text-white/40 hover:text-white text-sm transition-colors">
                 <i class="fas fa-lock"></i>
             </a>
@@ -662,8 +849,137 @@ Z
         </div>
     </div>
 
-    <!-- ⚡ SCRIPTS -->
+    <!-- Leaflet & Routing JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
     <script>
+        let map;
+        let routingControl;
+        const storeLat = <?php echo $store_lat; ?>;
+        const storeLng = <?php echo $store_lng; ?>;
+
+        function toggleRouteMap() {
+            const mapSection = document.getElementById('map-section');
+            const toggleText = document.getElementById('toggle-text');
+            const toggleIcon = document.getElementById('toggle-icon');
+            
+            if (mapSection.classList.contains('hidden')) {
+                // Open Map
+                mapSection.classList.remove('hidden');
+                toggleText.innerText = "ปิดแผนที่นำทาง";
+                toggleIcon.classList.remove('fa-location-arrow');
+                toggleIcon.classList.add('fa-times-circle');
+                
+                if (!map) {
+                    initRouteMap();
+                } else {
+                    // Refresh map size if it was initialized while hidden
+                    setTimeout(() => map.invalidateSize(), 100);
+                }
+            } else {
+                // Close Map
+                mapSection.classList.add('hidden');
+                toggleText.innerText = "ดูเส้นทางจากตำแหน่งของคุณ";
+                toggleIcon.classList.remove('fa-times-circle');
+                toggleIcon.classList.add('fa-location-arrow');
+            }
+        }
+
+        function initRouteMap() {
+            const mapSection = document.getElementById('map-section');
+            const loading = document.getElementById('loading-map');
+            
+            loading.classList.remove('hidden');
+            
+            if (!map) {
+                map = L.map('map').setView([storeLat, storeLng], 15);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap'
+                }).addTo(map);
+
+                // Fix Leaflet Default Icon path
+                delete L.Icon.Default.prototype._getIconUrl;
+                L.Icon.Default.mergeOptions({
+                    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+                    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+                    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+                });
+
+                // Show Store Marker Immediately
+                L.marker([storeLat, storeLng]).addTo(map)
+                    .bindPopup('🍣 <b>ร้านซูชิละกัน</b><br><?php echo addslashes($store_address); ?>')
+                    .openPopup();
+            }
+
+            // Get User Location
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const userLat = position.coords.latitude;
+                        const userLng = position.coords.longitude;
+                        
+                        loading.classList.add('hidden');
+
+                        if (routingControl) {
+                            map.removeControl(routingControl);
+                        }
+
+                        routingControl = L.Routing.control({
+                            waypoints: [
+                                L.latLng(userLat, userLng),
+                                L.latLng(storeLat, storeLng)
+                            ],
+                            routeWhileDragging: true,
+                            language: 'th',
+                            lineOptions: {
+                                styles: [{ color: '#F97316', weight: 6, opacity: 0.8 }]
+                            },
+                            createMarker: function(i, wp, nWps) {
+                                if (i === 0) {
+                                    return L.marker(wp.latLng).bindPopup('📍 <b>คุณอยู่ที่นี่</b>');
+                                }
+                                return null;
+                            }
+                        }).addTo(map);
+                        
+                        map.scrollIntoView({ behavior: 'smooth' });
+                    },
+                    (error) => {
+                        console.error('Geolocation error:', error);
+                        loading.classList.add('hidden');
+                        alert("ไม่สามารถเข้าถึงตำแหน่งของคุณได้ กรุณาตรวจสอบการอนุญาตระบุตำแหน่งในเบราว์เซอร์");
+                    }
+                );
+            } else {
+                loading.classList.add('hidden');
+                alert("เบราว์เซอร์ของคุณไม่รองรับการแสดงพิกัดตำแหน่ง");
+            }
+        }
+
+        // Auto-initialize map on load is removed - back to manual button
+
+        // Toggle Mute/Unmute for Video
+        function toggleMute() {
+            const video = document.getElementById('sushiVideo');
+            const icon = document.getElementById('muteIcon');
+            const btn = document.getElementById('muteBtn');
+            
+            if (video.muted) {
+                video.muted = false;
+                icon.classList.remove('fa-volume-mute');
+                icon.classList.add('fa-volume-up');
+                btn.classList.add('ring-4', 'ring-green-400/50');
+                setTimeout(() => btn.classList.remove('ring-4', 'ring-green-400/50'), 500);
+            } else {
+                video.muted = true;
+                icon.classList.remove('fa-volume-up');
+                icon.classList.add('fa-volume-mute');
+                btn.classList.add('ring-4', 'ring-red-400/50');
+                setTimeout(() => btn.classList.remove('ring-4', 'ring-red-400/50'), 500);
+            }
+        }
+
         // Loader
         window.addEventListener('load', () => {
             const loader = document.getElementById('page-loader');

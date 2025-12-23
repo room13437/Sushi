@@ -1,10 +1,18 @@
+<?php
+session_start();
+$error_message = $_SESSION['register_error'] ?? '';
+$success_message = $_SESSION['register_success'] ?? '';
+unset($_SESSION['register_error']);
+unset($_SESSION['register_success']);
+?>
 <!DOCTYPE html>
 <html lang="th">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🍣 สมัครสมาชิก | มารุซูชิ</title>
+    <link rel="icon" type="image/png" href="icon/icons.png?v=4">
+    <title>🍣 สมัครสมาชิก | ซูชิละกัน</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -98,6 +106,46 @@
                 transform: translateY(-20px);
             }
         }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .alert {
+            animation: slideDown 0.5s ease-out;
+        }
+
+        .alert-error {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(239, 68, 68, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .alert-success {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(16, 185, 129, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
     </style>
 </head>
 
@@ -116,7 +164,7 @@
             <div class="w-20 h-20 rounded-full border-4 border-white/30 border-t-white animate-spin"></div>
             <div class="absolute inset-0 flex items-center justify-center text-4xl animate-bounce">🍣</div>
         </div>
-        <p class="mt-6 text-white font-display text-xl font-bold">มารุซูชิ</p>
+        <p class="mt-6 text-white font-display text-xl font-bold">ซูชิละกัน</p>
     </div>
 
     <!-- Register Card -->
@@ -128,8 +176,22 @@
                 class="text-3xl font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-orange-700">
                 สมัครสมาชิก
             </h1>
-            <p class="text-orange-400 mt-2">เข้าร่วมครอบครัวมารุซูชิ</p>
+            <p class="text-orange-400 mt-2">เข้าร่วมครอบครัวซูชิละกัน</p>
         </div>
+
+        <?php if (!empty($error_message)): ?>
+            <div class="alert alert-error" id="alertMessage">
+                <i class="fas fa-exclamation-circle text-2xl"></i>
+                <span class="font-body font-semibold"><?php echo htmlspecialchars($error_message); ?></span>
+            </div>
+        <?php endif; ?>
+
+        <?php if (!empty($success_message)): ?>
+            <div class="alert alert-success" id="alertMessage">
+                <i class="fas fa-check-circle text-2xl"></i>
+                <span class="font-body font-semibold"><?php echo htmlspecialchars($success_message); ?></span>
+            </div>
+        <?php endif; ?>
 
         <!-- Form -->
         <form action="register" method="POST" class="space-y-5">
@@ -220,6 +282,17 @@
                 loader.style.opacity = '0';
                 setTimeout(() => loader.style.display = 'none', 500);
             }, 800);
+
+            // Auto-dismiss alert after 5 seconds
+            const alert = document.getElementById('alertMessage');
+            if (alert) {
+                setTimeout(() => {
+                    alert.style.opacity = '0';
+                    alert.style.transform = 'translateY(-20px)';
+                    alert.style.transition = 'all 0.5s ease-out';
+                    setTimeout(() => alert.remove(), 500);
+                }, 5000);
+            }
         });
     </script>
 </body>

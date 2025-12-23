@@ -71,6 +71,48 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['change_password'])) {
     }
 }
 
+// -------------------------------------------------------------------------
+// *** ส่วนประมวลผลการแก้ไขข้อมูลส่วนตัว ***
+// -------------------------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_profile'])) {
+    $new_username = trim($_POST['new_username']);
+
+    // ตรวจสอบข้อมูล
+    if (empty($new_username)) {
+        $message = "<div class='alert alert-error'>❌ กรุณากรอกชื่อผู้ใช้</div>";
+    } elseif ($new_username === $username) {
+        $message = "<div class='alert alert-error'>❌ ชื่อผู้ใช้ไม่มีการเปลี่ยนแปลง</div>";
+    } else {
+        // ตรวจสอบว่าชื่อผู้ใช้ใหม่ซ้ำกับคนอื่นหรือไม่
+        $stmt_check = $conn->prepare("SELECT id FROM $table_name WHERE username = ? AND id != ?");
+        $stmt_check->bind_param("si", $new_username, $user_identifier);
+        $stmt_check->execute();
+        $result_check = $stmt_check->get_result();
+
+        if ($result_check->num_rows > 0) {
+            $stmt_check->close();
+            $message = "<div class='alert alert-error'>❌ ชื่อผู้ใช้นี้ถูกใช้งานแล้ว กรุณาเลือกชื่ออื่น</div>";
+        } else {
+            $stmt_check->close();
+
+            // อัพเดทชื่อผู้ใช้
+            $stmt_update = $conn->prepare("UPDATE $table_name SET username = ? WHERE id = ?");
+            $stmt_update->bind_param("si", $new_username, $user_identifier);
+
+            if ($stmt_update->execute()) {
+                // อัพเดท session
+                $_SESSION['username'] = $new_username;
+                $username = htmlspecialchars($new_username);
+                $message = "<div class='alert alert-success'>✅ แก้ไขข้อมูลสำเร็จ! ชื่อผู้ใช้ของคุณถูกเปลี่ยนเป็น: <strong>" . $username . "</strong></div>";
+            } else {
+                $message = "<div class='alert alert-error'>❌ เกิดข้อผิดพลาด: " . $stmt_update->error . "</div>";
+            }
+            $stmt_update->close();
+        }
+    }
+}
+
+
 // ----------------------------------------------------
 // 4. ดึงข้อมูลคะแนนปัจจุบัน *ก่อน* ประมวลผล POST เพื่อใช้ในการตรวจสอบต้นทุน
 // ----------------------------------------------------
@@ -130,6 +172,24 @@ $conn->query("CREATE TABLE IF NOT EXISTS `reward_claims` (
     KEY `user_id` (`user_id`),
     KEY `status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+// *** สร้างตาราง sushi_redemption_tiers สำหรับกำหนดอัตราการแลกอัตโนมัติ ***
+$conn->query("CREATE TABLE IF NOT EXISTS `sushi_redemption_tiers` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `points` INT(11) NOT NULL UNIQUE,
+    `pieces` INT(11) NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+// ดึง Tier ทั้งหมดมาเก็บไว้ใน Array
+$sushi_tiers = [];
+$result_tiers = $conn->query("SELECT points, pieces FROM sushi_redemption_tiers ORDER BY points ASC");
+if ($result_tiers) {
+    while ($t_row = $result_tiers->fetch_assoc()) {
+        $sushi_tiers[(int) $t_row['points']] = (int) $t_row['pieces'];
+    }
+}
 
 // 8. *** ส่วนประมวลผลการใส่โค้ดรับ Point (Multi-Use System) ***
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['redeem_code'])) {
@@ -274,12 +334,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['gacha_spin'])) {
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['redeem_sushi'])) {
     $points_to_use = (int) $_POST['redeem_sushi'];
 
-    // กำหนด Tier การแลกซูชิ
-    $sushi_tiers = [
-        100 => 1,  // 100 Point = 1 ชิ้น
-        200 => 2,  // 200 Point = 2 ชิ้น
-        300 => 4   // 300 Point = 4 ชิ้น
-    ];
+    // ดึง Tier การแลกซูชิจากตัวแปร $sushi_tiers ที่ดึงจาก DB ไว้แล้ว
 
     // A. ตรวจสอบว่า Tier ที่เลือกมีอยู่จริง
     if (!isset($sushi_tiers[$points_to_use])) {
@@ -390,7 +445,7 @@ $conn->close();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎁 ศูนย์รวม Point | มารุซูชิ</title>
+    <title>🎁 ศูนย์รวม Point | ซูชิละกัน</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -572,6 +627,10 @@ $conn->close();
                     class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-display font-semibold hover:from-pink-600 hover:to-rose-600 shadow-md hover:shadow-lg transition-all text-sm">
                     <i class="fas fa-dice mr-2"></i>สุ่มกาชา
                 </button>
+                <button onclick="toggleEditProfile()" id="toggleEditProfileBtn"
+                    class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-display font-semibold hover:from-emerald-600 hover:to-teal-600 shadow-md hover:shadow-lg transition-all text-sm">
+                    <i class="fas fa-user-edit mr-2"></i>แก้ไขข้อมูล
+                </button>
                 <button onclick="togglePasswordForm()" id="togglePasswordBtn"
                     class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 text-white font-display font-semibold hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg transition-all text-sm">
                     <i class="fas fa-key mr-2"></i>เปลี่ยนรหัสผ่าน
@@ -671,37 +730,47 @@ $conn->close();
                     </thead>
                     <tbody class="divide-y divide-orange-100">
                         <?php
-                        $sushi_tiers = [100 => 1, 200 => 2, 300 => 4];
-                        foreach ($sushi_tiers as $points => $pieces):
-                            $is_available = $user_points_current >= $points;
+                        if (empty($sushi_tiers)):
                             ?>
-                            <tr class="<?php echo $is_available ? '' : 'opacity-50'; ?>">
-                                <td class="py-4 px-4 font-display font-bold text-orange-700"><?php echo $points; ?> Point
-                                </td>
-                                <td class="py-4 px-4 font-display font-bold text-pink-600">🍣 <?php echo $pieces; ?> ชิ้น
-                                </td>
-                                <td class="py-4 px-4">
-                                    <?php if ($is_available): ?>
-                                        <span class="px-3 py-1 rounded-full bg-green-100 text-green-600 text-sm font-semibold">✅
-                                            พร้อมแลก</span>
-                                    <?php else: ?>
-                                        <span class="px-3 py-1 rounded-full bg-gray-100 text-gray-400 text-sm font-semibold">❌
-                                            ไม่พอ</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="py-4 px-4">
-                                    <?php if ($is_available): ?>
-                                        <form method="POST" action="" class="inline">
-                                            <input type="hidden" name="redeem_sushi" value="<?php echo $points; ?>">
-                                            <button type="submit"
-                                                class="px-5 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-display font-bold text-sm hover:from-pink-600 hover:to-rose-600 transition-all">
-                                                แลกเลย
-                                            </button>
-                                        </form>
-                                    <?php endif; ?>
+                            <tr>
+                                <td colspan="4" class="py-12 text-center text-orange-400">
+                                    <i class="fas fa-info-circle text-4xl mb-3"></i>
+                                    <p class="font-display">ขณะนี้ยังไม่มีรายการแลกของรางวัล</p>
                                 </td>
                             </tr>
-                        <?php endforeach; ?>
+                            <?php
+                        else:
+                            foreach ($sushi_tiers as $points => $pieces):
+                                $is_available = $user_points_current >= $points;
+                                ?>
+                                <tr class="<?php echo $is_available ? '' : 'opacity-50'; ?>">
+                                    <td class="py-4 px-4 font-display font-bold text-orange-700"><?php echo $points; ?> Point
+                                    </td>
+                                    <td class="py-4 px-4 font-display font-bold text-pink-600">🍣 <?php echo $pieces; ?> ชิ้น
+                                    </td>
+                                    <td class="py-4 px-4">
+                                        <?php if ($is_available): ?>
+                                            <span class="px-3 py-1 rounded-full bg-green-100 text-green-600 text-sm font-semibold">✅
+                                                พร้อมแลก</span>
+                                        <?php else: ?>
+                                            <span class="px-3 py-1 rounded-full bg-gray-100 text-gray-400 text-sm font-semibold">❌
+                                                ไม่พอ</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="py-4 px-4">
+                                        <?php if ($is_available): ?>
+                                            <form method="POST" action="" class="inline">
+                                                <input type="hidden" name="redeem_sushi" value="<?php echo $points; ?>">
+                                                <button type="submit"
+                                                    class="px-5 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-display font-bold text-sm hover:from-pink-600 hover:to-rose-600 transition-all">
+                                                    แลกเลย
+                                                </button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -842,6 +911,45 @@ $conn->close();
             </div>
         <?php endif; ?>
 
+        <!-- Edit Profile Card (Hidden by default) -->
+        <div id="editProfileCard" class="glass-card rounded-3xl p-8 mt-6" style="display: none;">
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-100 flex items-center justify-center text-2xl">✏️</div>
+                    <h3 class="text-xl font-display font-bold text-orange-800">แก้ไขข้อมูลส่วนตัว</h3>
+                </div>
+                <button onclick="toggleEditProfile()" class="text-gray-400 hover:text-red-500 transition-colors">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+
+            <form method="POST" action="" class="max-w-md mx-auto">
+                <div class="space-y-4">
+                    <!-- Username -->
+                    <div>
+                        <label class="block text-sm font-semibold text-orange-700 mb-2">
+                            <i class="fas fa-user mr-2"></i>ชื่อผู้ใช้
+                        </label>
+                        <input type="text" name="new_username" required
+                            class="w-full px-4 py-3 rounded-xl border-2 border-orange-200 bg-white text-orange-800 placeholder-orange-300 font-display focus:border-orange-500 focus:outline-none"
+                            placeholder="ชื่อผู้ใช้ใหม่" value="<?php echo $username; ?>">
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" name="edit_profile"
+                        class="w-full px-6 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-display font-bold text-lg hover:from-emerald-600 hover:to-teal-600 shadow-lg hover:shadow-xl transition-all">
+                        <i class="fas fa-save mr-2"></i>บันทึกข้อมูล
+                    </button>
+                </div>
+
+                <!-- Info -->
+                <div class="mt-4 p-3 bg-emerald-50 rounded-xl text-sm text-emerald-700">
+                    <i class="fas fa-info-circle mr-2"></i>
+                    หลังจากเปลี่ยนชื่อผู้ใช้แล้ว ใช้ชื่อใหม่ในการเข้าสู่ระบบครั้งถัดไป
+                </div>
+            </form>
+        </div>
+
         <!-- Change Password Card (Hidden by default) -->
         <div id="passwordFormCard" class="glass-card rounded-3xl p-8 mt-6" style="display: none;">
             <div class="flex items-center justify-between mb-6">
@@ -930,6 +1038,20 @@ $conn->close();
                 }
             }
 
+            function toggleEditProfile() {
+                const form = document.getElementById('editProfileCard');
+                const btn = document.getElementById('toggleEditProfileBtn');
+
+                if (form.style.display === 'none') {
+                    form.style.display = 'block';
+                    btn.classList.add('opacity-50');
+                    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } else {
+                    form.style.display = 'none';
+                    btn.classList.remove('opacity-50');
+                }
+            }
+
             function togglePasswordForm() {
                 const form = document.getElementById('passwordFormCard');
                 const btn = document.getElementById('togglePasswordBtn');
@@ -962,6 +1084,8 @@ $conn->close();
                 const message = document.querySelector('.alert');
                 if (message && message.textContent.includes('รหัสผ่าน')) {
                     togglePasswordForm();
+                } else if (message && message.textContent.includes('ชื่อผู้ใช้')) {
+                    toggleEditProfile();
                 }
             });
         </script>
@@ -1043,7 +1167,7 @@ $conn->close();
 
         <!-- Footer -->
         <div class="text-center mt-8 text-orange-400 text-sm">
-            <p>🍣 มารุซูชิ - Point Rewards Center</p>
+            <p>🍣 ซูชิละกัน - Point Rewards Center</p>
         </div>
     </div>
 

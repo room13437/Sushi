@@ -25,6 +25,31 @@ if (!$conn->query($table_sql)) {
 // Add pickup_time column if not exists (for existing tables)
 $conn->query("ALTER TABLE daily_queue ADD COLUMN pickup_time TIME NULL AFTER details");
 
+// --- FETCH STORE HOURS FROM DATABASE ---
+$store_open_time = '11:00';
+$store_close_time = '22:00';
+
+// Connect to products database to get store hours
+$conn_products = new mysqli("localhost", "root", "", "products");
+if (!$conn_products->connect_error) {
+    $sql_hours = "SELECT setting_key, setting_value FROM store_settings WHERE setting_key IN ('store_open_time', 'store_close_time')";
+    $result_hours = $conn_products->query($sql_hours);
+    if ($result_hours) {
+        while ($row = $result_hours->fetch_assoc()) {
+            if ($row['setting_key'] === 'store_open_time') {
+                $store_open_time = $row['setting_value'];
+            } elseif ($row['setting_key'] === 'store_close_time') {
+                $store_close_time = $row['setting_value'];
+            }
+        }
+    }
+    $conn_products->close();
+}
+
+// Parse hour values for validation
+$open_hour = (int) substr($store_open_time, 0, 2);
+$close_hour = (int) substr($store_close_time, 0, 2);
+
 // Handle booking
 $ticket = null;
 $error = null;
@@ -37,11 +62,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $today = date('Y-m-d');
 
     if ($name && $phone) {
-        // Validate pickup time (11:00 - 22:00)
+        // Validate pickup time based on store hours from database
         if ($pickup_time) {
             $hour = (int) substr($pickup_time, 0, 2);
-            if ($hour < 11 || $hour >= 22) {
-                $error = "กรุณาเลือกเวลารับของระหว่าง 11:00 - 22:00 น.";
+            if ($hour < $open_hour || $hour >= $close_hour) {
+                $error = "กรุณาเลือกเวลารับของระหว่าง {$store_open_time} - {$store_close_time} น.";
             }
         }
 
@@ -79,7 +104,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎫 จองคิวออนไลน์ | มารุซูชิ</title>
+    <link rel="icon" type="image/png" href="icon/icons.png?v=4">
+    <title>🎫 จองคิวออนไลน์ | ซูชิละกัน</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link
         href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=Prompt:wght@400;600;700;800&display=swap"
@@ -435,7 +461,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <i class="fas fa-clock" style="font-size: 1.5rem; margin-right: 10px;"></i>
                             <div style="margin-top: 10px;">เวลารับของ</div>
                             <div style="font-size: 2rem; color: #EA580C; margin-top: 5px;">
-                                <?php echo date('H:i', strtotime($ticket['pickup_time'])); ?> น.</div>
+                                <?php echo date('H:i', strtotime($ticket['pickup_time'])); ?> น.
+                            </div>
                         </div>
                     <?php endif; ?>
 
@@ -452,6 +479,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <i class="fas fa-arrow-left"></i> กลับหน้าหลัก
                     </a>
                 </div>
+
+                <!-- Prevent refresh resubmission - redirect to index on refresh -->
+                <script>
+                    // Replace the current history state to prevent form resubmission
+                    if (window.history.replaceState) {
+                        window.history.replaceState(null, null, window.location.href);
+                    }
+
+                    // Detect if user tries to refresh and redirect to index
+                    window.addEventListener('beforeunload', function (e) {
+                        // Redirect to index to prevent resubmission
+                        window.location.href = 'index.php';
+                    });
+                </script>
 
             <?php else: ?>
                 <!-- Booking Form -->
@@ -494,11 +535,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             style="width: 100%; padding: 16px 20px; border: 2px solid #FED7AA; border-radius: 16px; font-family: 'Sarabun', sans-serif; font-size: 1.05rem; background: #FFFBF7; cursor: pointer; transition: all 0.3s;">
                             <option value="">ไม่ระบุเวลา (รับได้ทันที)</option>
                             <?php
-                            // Generate time options from 11:00 to 21:30 (30 min intervals)
-                            for ($hour = 11; $hour < 22; $hour++) {
+                            // Generate time options based on store hours from database
+                            $start_hour = $open_hour;
+                            $end_hour = $close_hour;
+
+                            for ($hour = $start_hour; $hour < $end_hour; $hour++) {
                                 foreach ([0, 30] as $minute) {
-                                    if ($hour == 21 && $minute == 30)
-                                        continue; // Skip 21:30
+                                    // Skip the last 30-minute slot if it's at closing time
+                                    if ($hour == $end_hour - 1 && $minute == 30 && $hour >= 21)
+                                        continue;
                                     $time = sprintf("%02d:%02d", $hour, $minute);
                                     echo "<option value='$time'>$time น.</option>";
                                 }
@@ -506,7 +551,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             ?>
                         </select>
                         <small style="display: block; margin-top: 8px; color: #9A3412; font-size: 0.9rem;">
-                            <i class="fas fa-info-circle"></i> เวลาทำการ: 11:00 - 22:00 น.
+                            <i class="fas fa-info-circle"></i> เวลาทำการ: <?php echo $store_open_time; ?> -
+                            <?php echo $store_close_time; ?> น.
                         </small>
                     </div>
 

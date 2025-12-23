@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🍣 เข้าสู่ระบบ | มารุซูชิ Premium Sushi</title>
+    <link rel="icon" type="image/png" href="icon/icons.png?v=4">
+    <title>🍣 เข้าสู่ระบบ | ซูชิละกัน Premium Sushi</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -122,7 +123,7 @@
             <div class="w-20 h-20 rounded-full border-4 border-white/30 border-t-white animate-spin"></div>
             <div class="absolute inset-0 flex items-center justify-center text-4xl animate-bounce">🍣</div>
         </div>
-        <p class="mt-6 text-white font-display text-xl font-bold">มารุซูชิ</p>
+        <p class="mt-6 text-white font-display text-xl font-bold">ซูชิละกัน</p>
     </div>
 
     <!-- Login Card -->

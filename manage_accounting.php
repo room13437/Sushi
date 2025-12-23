@@ -711,7 +711,7 @@ $today = date('Y-m-d');
 
             doc.setTextColor(255, 255, 255);
             doc.setFontSize(24);
-            doc.text('มารุซูชิ', 105, 15, { align: 'center' });
+            doc.text('ซูชิละกัน', 105, 15, { align: 'center' });
 
             doc.setFontSize(16);
             doc.text('Daily Accounting Report', 105, 25, { align: 'center' });

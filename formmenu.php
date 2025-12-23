@@ -20,6 +20,7 @@ if (!$isLoggedIn) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="icon/icons.png?v=4">
     <title>🍲 เมนูผู้ดูแลระบบ | Admin Panel 🛠️</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -808,6 +809,14 @@ if (!$isLoggedIn) {
                 <div class="menu-subtitle">Sushi Claims</div>
             </a>
 
+            <!-- Redemption Tiers Management -->
+            <a href="manage_redemptions" class="menu-card"
+                style="background: linear-gradient(135deg, #FF7043 0%, #F4511E 100%);">
+                <div class="menu-icon">⚙️</div>
+                <div class="menu-title">อัตราแลกซูชิ</div>
+                <div class="menu-subtitle">Redemption Tiers</div>
+            </a>
+
             <!-- Accounting -->
             <a href="manage_accounting" class="menu-card"
                 style="background: linear-gradient(135deg, #4CAF50 0%, #8BC34A 100%);">
@@ -822,6 +831,30 @@ if (!$isLoggedIn) {
                 <div class="menu-icon">👥</div>
                 <div class="menu-title">จัดการผู้ดูแลระบบ</div>
                 <div class="menu-subtitle">Admin Users</div>
+            </a>
+
+            <!-- Customer Management -->
+            <a href="manage_customers" class="menu-card"
+                style="background: linear-gradient(135deg, #9C27B0 0%, #673AB7 100%);">
+                <div class="menu-icon">👤</div>
+                <div class="menu-title">จัดการลูกค้า</div>
+                <div class="menu-subtitle">Customers</div>
+            </a>
+
+            <!-- Store Hours Management -->
+            <a href="manage_hours" class="menu-card"
+                style="background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%);">
+                <div class="menu-icon">🕐</div>
+                <div class="menu-title">จัดการเวลาเปิด-ปิด</div>
+                <div class="menu-subtitle">Store Hours</div>
+            </a>
+
+            <!-- Map Management -->
+            <a href="manage_map" class="menu-card"
+                style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%);">
+                <div class="menu-icon">📍</div>
+                <div class="menu-title">จัดการที่ตั้งร้าน</div>
+                <div class="menu-subtitle">Store Location</div>
             </a>
         </div>
 

@@ -16,6 +16,7 @@ if ($isLoggedIn) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="icon/icons.png?v=4">
     <title>🔒 เข้าสู่ระบบผู้ดูแล | Admin Login</title>
 
     <!-- Fonts -->

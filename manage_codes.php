@@ -381,7 +381,7 @@ $conn->close();
 
         <!-- Footer -->
         <div class="text-center mt-8 text-orange-400 text-sm">
-            <p>🍣 มารุซูชิ - Admin Panel</p>
+            <p>🍣 ซูชิละกัน - Admin Panel</p>
         </div>
 
     </div>
