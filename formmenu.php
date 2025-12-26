@@ -856,6 +856,14 @@ if (!$isLoggedIn) {
                 <div class="menu-title">จัดการที่ตั้งร้าน</div>
                 <div class="menu-subtitle">Store Location</div>
             </a>
+
+            <!-- Discount Codes Management -->
+            <a href="manage_discount_codes" class="menu-card"
+                style="background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%);">
+                <div class="menu-icon">🏷️</div>
+                <div class="menu-title">โค้ดส่วนลด</div>
+                <div class="menu-subtitle">Discount Codes</div>
+            </a>
         </div>
 
         <!-- Footer Actions -->

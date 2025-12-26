@@ -235,6 +235,10 @@ $conn->close();
                     <p class="text-orange-600 mt-2">สร้างและจัดการโค้ดสำหรับลูกค้าแลก Point</p>
                 </div>
                 <div class="flex gap-3">
+                    <a href="print_codes" target="_blank"
+                        class="px-5 py-3 rounded-xl bg-green-500 text-white font-display font-bold hover:bg-green-600 transition-all">
+                        <i class="fas fa-print mr-2"></i> พิมพ์โค้ด
+                    </a>
                     <a href="formmenu"
                         class="px-5 py-3 rounded-xl bg-orange-100 text-orange-600 font-display font-bold hover:bg-orange-200 transition-all">
                         <i class="fas fa-arrow-left mr-2"></i> กลับ

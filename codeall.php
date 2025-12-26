@@ -4,6 +4,7 @@ include "db.php";
 
 // 2. เริ่ม Session เพื่อเข้าถึงข้อมูลการล็อกอิน
 session_start();
+require_once 'lang_config.php';
 
 // 3. ตรวจสอบสถานะการล็อกอิน
 if (!isset($_SESSION['user_id'])) {
@@ -333,6 +334,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['gacha_spin'])) {
 // -------------------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['redeem_sushi'])) {
     $points_to_use = (int) $_POST['redeem_sushi'];
+    $discount_code_input = isset($_POST['discount_code']) ? strtoupper(trim($_POST['discount_code'])) : '';
 
     // ดึง Tier การแลกซูชิจากตัวแปร $sushi_tiers ที่ดึงจาก DB ไว้แล้ว
 
@@ -342,45 +344,117 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['redeem_sushi'])) {
     } else {
         $sushi_count = $sushi_tiers[$points_to_use];
 
-        // B. ตรวจสอบคะแนน
-        if ($user_points_current < $points_to_use) {
-            $message = "<div class='alert alert-error'>💸 คะแนนไม่เพียงพอ! คุณมี {$current_points_for_display} Point ต้องใช้ {$points_to_use} Point</div>";
-        } else {
+        // A1. ตรวจสอบและคำนวณส่วนลด
+        $discount_percent = 0;
+        $discount_code_id = 0;
+        $final_points = $points_to_use;
 
-            $points_to_deduct = -1 * $points_to_use; // ลบ Point
+        if (!empty($discount_code_input)) {
+            // ตรวจสอบโค้ดส่วนลด
+            $stmt_discount = $conn->prepare("SELECT id, discount_percent, max_uses, active FROM discount_codes WHERE code = ?");
+            $stmt_discount->bind_param("s", $discount_code_input);
+            $stmt_discount->execute();
+            $result_discount = $stmt_discount->get_result();
 
-            // C. อัปเดตคะแนน
-            $sql_sushi_update = "UPDATE $table_name SET points = points + ? WHERE id = ?";
-            $stmt_sushi_update = $conn->prepare($sql_sushi_update);
+            if ($result_discount->num_rows > 0) {
+                $discount_row = $result_discount->fetch_assoc();
+                $discount_code_id = $discount_row['id'];
+                $is_active = (int) $discount_row['active'];
 
-            if ($stmt_sushi_update) {
-                $stmt_sushi_update->bind_param("ii", $points_to_deduct, $user_identifier);
-
-                if ($stmt_sushi_update->execute()) {
-
-                    // D. บันทึกรายการแลกซูชิในตาราง reward_claims
-                    $stmt_claim = $conn->prepare("INSERT INTO reward_claims (user_id, username, points_used, items_count, status) VALUES (?, ?, ?, ?, 'pending')");
-                    $stmt_claim->bind_param("isii", $user_identifier, $username, $points_to_use, $sushi_count);
-                    $stmt_claim->execute();
-                    $claim_id = $stmt_claim->insert_id;
-                    $stmt_claim->close();
-
-                    $user_points_current += $points_to_deduct;
-                    $current_points_for_display = number_format($user_points_current);
-
-                    // E. บันทึกประวัติการแลก
-                    $sushi_desc = "แลกซูชิ: {$sushi_count} ชิ้น (#" . $claim_id . ")";
-                    $stmt_history = $conn->prepare("INSERT INTO redemption_history (user_id, code, points, type) VALUES (?, ?, ?, 'sushi')");
-                    $stmt_history->bind_param("isi", $user_identifier, $sushi_desc, $points_to_deduct);
-                    $stmt_history->execute();
-                    $stmt_history->close();
-
-                    $message = "<div class='alert alert-success'>🍣 แลกสำเร็จ! คุณใช้ {$points_to_use} Point แลกซูชิ {$sushi_count} ชิ้น<br>กรุณารับของที่ร้าน (รหัส: #{$claim_id})</div>";
-
+                if ($is_active == 0) {
+                    $message = "<div class='alert alert-error'>❌ โค้ดส่วนลดนี้ถูกปิดใช้งานแล้ว</div>";
+                    $stmt_discount->close();
                 } else {
-                    $message = "<div class='alert alert-error'>❌ เกิดข้อผิดพลาด: " . $stmt_sushi_update->error . "</div>";
+                    // ตรวจสอบว่าโค้ดถูกใช้หมดหรือยัง
+                    $stmt_usage_check = $conn->prepare("SELECT COUNT(*) as usage_count FROM discount_code_usage WHERE code_id = ?");
+                    $stmt_usage_check->bind_param("i", $discount_code_id);
+                    $stmt_usage_check->execute();
+                    $usage_result = $stmt_usage_check->get_result();
+                    $usage_count = $usage_result->fetch_assoc()['usage_count'];
+                    $stmt_usage_check->close();
+
+                    if ($usage_count >= $discount_row['max_uses']) {
+                        $message = "<div class='alert alert-error'>❌ โค้ดส่วนลดนี้ถูกใช้งานครบจำนวนแล้ว</div>";
+                        $stmt_discount->close();
+                    } else {
+                        // ตรวจสอบว่าผู้ใช้คนนี้เคยใช้โค้ดนี้หรือยัง
+                        $stmt_user_check = $conn->prepare("SELECT id FROM discount_code_usage WHERE code_id = ? AND user_id = ?");
+                        $stmt_user_check->bind_param("ii", $discount_code_id, $user_identifier);
+                        $stmt_user_check->execute();
+                        $user_check_result = $stmt_user_check->get_result();
+
+                        if ($user_check_result->num_rows > 0) {
+                            $message = "<div class='alert alert-error'>❌ คุณเคยใช้โค้ดส่วนลดนี้ไปแล้ว</div>";
+                            $stmt_user_check->close();
+                            $stmt_discount->close();
+                        } else {
+                            // ใช้โค้ดส่วนลดได้!
+                            $discount_percent = (int) $discount_row['discount_percent'];
+                            $final_points = round($points_to_use * (100 - $discount_percent) / 100);
+                            $stmt_user_check->close();
+                            $stmt_discount->close();
+                        }
+                    }
                 }
-                $stmt_sushi_update->close();
+            } else {
+                $message = "<div class='alert alert-error'>❌ โค้ดส่วนลดไม่ถูกต้อง</div>";
+                $stmt_discount->close();
+            }
+        }
+
+        // ถ้าไม่มี message error จากโค้ดส่วนลด ให้ดำเนินการต่อ
+        if (empty($message)) {
+            // B. ตรวจสอบคะแนน (ใช้ final_points ที่คำนวณส่วนลดแล้ว)
+            if ($user_points_current < $final_points) {
+                $message = "<div class='alert alert-error'>💸 คะแนนไม่เพียงพอ! คุณมี {$current_points_for_display} Point ต้องใช้ {$final_points} Point</div>";
+            } else {
+
+                $points_to_deduct = -1 * $final_points; // ลบ Point (ใช้ final_points ที่คำนวณส่วนลดแล้ว)
+
+                // C. อัปเดตคะแนน
+                $sql_sushi_update = "UPDATE $table_name SET points = points + ? WHERE id = ?";
+                $stmt_sushi_update = $conn->prepare($sql_sushi_update);
+
+                if ($stmt_sushi_update) {
+                    $stmt_sushi_update->bind_param("ii", $points_to_deduct, $user_identifier);
+
+                    if ($stmt_sushi_update->execute()) {
+
+                        // D. บันทึกรายการแลกซูชิในตาราง reward_claims
+                        $stmt_claim = $conn->prepare("INSERT INTO reward_claims (user_id, username, points_used, items_count, status) VALUES (?, ?, ?, ?, 'pending')");
+                        $stmt_claim->bind_param("isii", $user_identifier, $username, $points_to_use, $sushi_count);
+                        $stmt_claim->execute();
+                        $claim_id = $stmt_claim->insert_id;
+                        $stmt_claim->close();
+
+                        $user_points_current += $points_to_deduct;
+                        $current_points_for_display = number_format($user_points_current);
+
+                        // E. บันทึกประวัติการแลก
+                        $sushi_desc = "แลกซูชิ: {$sushi_count} ชิ้น (#" . $claim_id . ")";
+                        $stmt_history = $conn->prepare("INSERT INTO redemption_history (user_id, code, points, type) VALUES (?, ?, ?, 'sushi')");
+                        $stmt_history->bind_param("isi", $user_identifier, $sushi_desc, $points_to_deduct);
+                        $stmt_history->execute();
+                        $stmt_history->close();
+
+                        // F. บันทึกการใช้โค้ดส่วนลด (ถ้ามี)
+                        if ($discount_code_id > 0 && $discount_percent > 0) {
+                            $points_saved = $points_to_use - $final_points;
+                            $stmt_disc_usage = $conn->prepare("INSERT INTO discount_code_usage (code_id, user_id, points_saved) VALUES (?, ?, ?)");
+                            $stmt_disc_usage->bind_param("iii", $discount_code_id, $user_identifier, $points_saved);
+                            $stmt_disc_usage->execute();
+                            $stmt_disc_usage->close();
+
+                            $message = "<div class='alert alert-success'>🍣 แลกสำเร็จ! ใช้ {$final_points} Point (ส่วนลด {$discount_percent}%, ประหยัด {$points_saved} Point)<br>แลกซูชิ {$sushi_count} ชิ้น | กรุณารับของที่ร้าน (รหัส: #{$claim_id})</div>";
+                        } else {
+                            $message = "<div class='alert alert-success'>🍣 แลกสำเร็จ! คุณใช้ {$points_to_use} Point แลกซูชิ {$sushi_count} ชิ้น<br>กรุณารับของที่ร้าน (รหัส: #{$claim_id})</div>";
+                        }
+
+                    } else {
+                        $message = "<div class='alert alert-error'>❌ เกิดข้อผิดพลาด: " . $stmt_sushi_update->error . "</div>";
+                    }
+                    $stmt_sushi_update->close();
+                }
             }
         }
     }
@@ -440,12 +514,12 @@ $conn->close();
 ?>
 
 <!DOCTYPE html>
-<html lang="th">
+<html lang="<?php echo getCurrentLang(); ?>">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎁 ศูนย์รวม Point | ซูชิละกัน</title>
+    <title>🎁 <?php echo isLangThai() ? 'ศูนย์รวม Point' : 'Points Center'; ?> | <?php echo t('store_name'); ?></title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -589,21 +663,22 @@ $conn->close();
                     <div class="text-5xl mb-3">🍣</div>
                     <h1
                         class="text-3xl md:text-4xl font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-orange-700 mb-2">
-                        ศูนย์รวม Point
+                        <?php echo isLangThai() ? 'ศูนย์รวม Point' : 'Points Center'; ?>
                     </h1>
                     <p class="text-orange-600">
-                        สวัสดี <span class="font-bold text-orange-700"><?php echo $username; ?></span> 👋
+                        <?php echo isLangThai() ? 'สวัสดี' : 'Hello'; ?> <span
+                            class="font-bold text-orange-700"><?php echo $username; ?></span> 👋
                     </p>
                 </div>
 
                 <div class="flex gap-3">
                     <a href="index"
                         class="px-6 py-3 rounded-2xl bg-orange-100 text-orange-600 font-display font-bold hover:bg-orange-200 transition-all flex items-center gap-2">
-                        <i class="fas fa-home"></i> หน้าหลัก
+                        <i class="fas fa-home"></i> <?php echo t('home'); ?>
                     </a>
                     <a href="logout"
                         class="px-6 py-3 rounded-2xl bg-red-100 text-red-500 font-display font-bold hover:bg-red-200 transition-all flex items-center gap-2">
-                        <i class="fas fa-sign-out-alt"></i> ออก
+                        <i class="fas fa-sign-out-alt"></i> <?php echo t('logout'); ?>
                     </a>
                 </div>
             </div>
@@ -621,30 +696,32 @@ $conn->close();
             <div class="flex gap-3 justify-center flex-wrap">
                 <button onclick="toggleRedeemCode()" id="toggleRedeemBtn"
                     class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-orange-600 text-white font-display font-semibold hover:from-orange-600 hover:to-orange-700 shadow-md hover:shadow-lg transition-all text-sm">
-                    <i class="fas fa-gift mr-2"></i>แลกโค้ด
+                    <i class="fas fa-gift mr-2"></i><?php echo isLangThai() ? 'แลกโค้ด' : 'Redeem Code'; ?>
                 </button>
                 <button onclick="toggleGacha()" id="toggleGachaBtn"
                     class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-display font-semibold hover:from-pink-600 hover:to-rose-600 shadow-md hover:shadow-lg transition-all text-sm">
-                    <i class="fas fa-dice mr-2"></i>สุ่มกาชา
+                    <i class="fas fa-dice mr-2"></i><?php echo isLangThai() ? 'สุ่มกาชา' : 'Lucky Gacha'; ?>
                 </button>
                 <button onclick="toggleEditProfile()" id="toggleEditProfileBtn"
                     class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-display font-semibold hover:from-emerald-600 hover:to-teal-600 shadow-md hover:shadow-lg transition-all text-sm">
-                    <i class="fas fa-user-edit mr-2"></i>แก้ไขข้อมูล
+                    <i class="fas fa-user-edit mr-2"></i><?php echo isLangThai() ? 'แก้ไขข้อมูล' : 'Edit Profile'; ?>
                 </button>
                 <button onclick="togglePasswordForm()" id="togglePasswordBtn"
                     class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 text-white font-display font-semibold hover:from-blue-600 hover:to-blue-700 shadow-md hover:shadow-lg transition-all text-sm">
-                    <i class="fas fa-key mr-2"></i>เปลี่ยนรหัสผ่าน
+                    <i class="fas fa-key mr-2"></i><?php echo isLangThai() ? 'เปลี่ยนรหัสผ่าน' : 'Change Password'; ?>
                 </button>
                 <button onclick="toggleHistory()" id="toggleHistoryBtn"
                     class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 text-white font-display font-semibold hover:from-purple-600 hover:to-purple-700 shadow-md hover:shadow-lg transition-all text-sm">
-                    <i class="fas fa-history mr-2"></i>ดูประวัติ
+                    <i class="fas fa-history mr-2"></i><?php echo isLangThai() ? 'ดูประวัติ' : 'View History'; ?>
                 </button>
             </div>
         </div>
 
         <!-- Points Display -->
         <div class="glass-card rounded-3xl p-8 mb-6 text-center border-2 border-orange-300">
-            <p class="text-orange-500 font-display font-semibold mb-2">💎 คะแนนสะสมของคุณ</p>
+            <p class="text-orange-500 font-display font-semibold mb-2">💎
+                <?php echo isLangThai() ? 'คะแนนสะสมของคุณ' : 'Your Points'; ?>
+            </p>
             <div
                 class="text-6xl md:text-7xl font-display font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-orange-600">
                 <?php echo $current_points_for_display; ?>
@@ -661,7 +738,9 @@ $conn->close();
                     <div class="flex items-center gap-3">
                         <div class="w-12 h-12 rounded-2xl bg-green-100 flex items-center justify-center text-2xl">🎁
                         </div>
-                        <h3 class="text-xl font-display font-bold text-orange-800">แลกโค้ดรับ Point</h3>
+                        <h3 class="text-xl font-display font-bold text-orange-800">
+                            <?php echo isLangThai() ? 'แลกโค้ดรับ Point' : 'Redeem Code for Points'; ?>
+                        </h3>
                     </div>
                     <button onclick="toggleRedeemCode()" class="text-gray-400 hover:text-red-500 transition-colors">
                         <i class="fas fa-times text-2xl"></i>
@@ -669,7 +748,9 @@ $conn->close();
                 </div>
 
                 <form method="POST" action="" class="space-y-4">
-                    <input type="text" name="redeem_code" placeholder="ใส่โค้ดที่นี่..." required maxlength="50"
+                    <input type="text" name="redeem_code"
+                        placeholder="<?php echo isLangThai() ? 'ใส่โค้ดที่นี่...' : 'Enter code here...'; ?>" required
+                        maxlength="50"
                         class="w-full px-5 py-4 rounded-2xl border-2 border-orange-200 bg-white text-orange-800 placeholder-orange-300 font-display uppercase focus:border-orange-500 focus:outline-none">
                     <button type="submit"
                         class="w-full py-4 rounded-2xl font-display font-bold text-white bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg hover:shadow-xl transition-all">
@@ -718,6 +799,53 @@ $conn->close();
                 <h3 class="text-xl font-display font-bold text-orange-800">แลกซูชิด้วย Point</h3>
             </div>
 
+            <!-- Discount Code Section -->
+            <div class="bg-gradient-to-r from-cyan-50 to-blue-50 rounded-2xl p-6 mb-6 border-2 border-cyan-200"
+                id="discountSection">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-xl bg-cyan-500 flex items-center justify-center text-xl">🏷️</div>
+                    <h4 class="text-lg font-display font-bold text-cyan-800">มีโค้ดส่วนลดไหม?</h4>
+                </div>
+                <p class="text-cyan-600 text-sm mb-4">ใส่โค้ดส่วนลดเพื่อลดจำนวน Point ที่ต้องใช้ในการแลกซูชิ</p>
+
+                <div class="flex gap-3 mb-3">
+                    <input type="text" id="discountCodeInput" placeholder="ใส่โค้ดส่วนลด (ถ้ามี)" maxlength="50"
+                        class="flex-1 px-5 py-3 rounded-xl border-2 border-cyan-300 bg-white text-cyan-800 placeholder-cyan-400 font-display uppercase focus:border-cyan-500 focus:outline-none"
+                        onkeyup="if(event.key === 'Enter') checkDiscountPreview()">
+                    <button onclick="checkDiscountPreview()"
+                        class="px-6 py-3 rounded-xl bg-cyan-500 text-white font-display font-bold hover:bg-cyan-600 transition-all">
+                        <i class="fas fa-search mr-2"></i>ตรวจสอบ
+                    </button>
+                </div>
+
+                <!-- Discount Preview Result -->
+                <div id="discountPreview" style="display: none;"
+                    class="mt-4 p-4 rounded-xl border-2 border-green-300 bg-green-50">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-green-700 font-display font-bold text-lg">✅ ใช้โค้ดได้!</span>
+                        <button onclick="clearDiscount()" class="text-red-500 hover:text-red-700">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <p class="text-green-800 font-semibold" id="discountMessage"></p>
+                    <p class="text-green-600 text-sm mt-1" id="discountInfo"></p>
+                </div>
+
+                <!-- Error Message -->
+                <div id="discountError" style="display: none;"
+                    class="mt-4 p-4 rounded-xl border-2 border-red-300 bg-red-50">
+                    <div class="flex items-center justify-between">
+                        <span class="text-red-700 font-display" id="errorMessage"></span>
+                        <button onclick="clearDiscount()" class="text-red-500 hover:text-red-700">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <p class="text-cyan-500 text-xs mt-3"><i class="fas fa-info-circle mr-1"></i>
+                    ตรวจสอบโค้ดก่อนแลกเพื่อดูส่วนลด หรือกรอกโค้ดแล้วกดปุ่ม "แลกเลย" เลย</p>
+            </div>
+
             <div class="overflow-x-auto">
                 <table class="w-full">
                     <thead>
@@ -759,8 +887,9 @@ $conn->close();
                                     </td>
                                     <td class="py-4 px-4">
                                         <?php if ($is_available): ?>
-                                            <form method="POST" action="" class="inline">
+                                            <form method="POST" action="" class="inline" onsubmit="addDiscountCode(this)">
                                                 <input type="hidden" name="redeem_sushi" value="<?php echo $points; ?>">
+                                                <input type="hidden" name="discount_code" value="" class="discount-code-field">
                                                 <button type="submit"
                                                     class="px-5 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-display font-bold text-sm hover:from-pink-600 hover:to-rose-600 transition-all">
                                                     แลกเลย
@@ -1078,6 +1207,105 @@ $conn->close();
                     history.style.display = 'none';
                     btn.classList.remove('opacity-50');
                 }
+            }
+
+            // ตรวจสอบโค้ดส่วนลดแบบ Preview
+            let selectedPoints = 0;
+
+            function checkDiscountPreview() {
+                const code = document.getElementById('discountCodeInput').value.trim().toUpperCase();
+
+                if (!code) {
+                    showDiscountError('❌ กรุณาใส่โค้ดส่วนลด');
+                    return;
+                }
+
+                // ถ้าไม่มีการเลือก tier ให้ใช้ tier แรกที่พอยท์เพียงพอ
+                const tables = document.querySelectorAll('form[onsubmit*="addDiscountCode"]');
+                let pointsToCheck = 0;
+
+                // หาค่า Point ที่ต่ำสุดที่สามารถแลกได้
+                tables.forEach(form => {
+                    const hiddenInput = form.querySelector('input[name="redeem_sushi"]');
+                    if (hiddenInput) {
+                        const points = parseInt(hiddenInput.value);
+                        if (pointsToCheck === 0 || points < pointsToCheck) {
+                            pointsToCheck = points;
+                        }
+                    }
+                });
+
+                if (pointsToCheck === 0) {
+                    showDiscountError('❌ ไม่พบรายการแลกซูชิ');
+                    return;
+                }
+
+                selectedPoints = pointsToCheck;
+
+                // เรียก AJAX
+                fetch(`check_discount_code.php?code=${encodeURIComponent(code)}&points=${pointsToCheck}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showDiscountSuccess(data);
+                        } else {
+                            showDiscountError(data.message);
+                        }
+                    })
+                    .catch(error => {
+                        showDiscountError('❌ เกิดข้อผิดพลาดในการตรวจสอบโค้ด');
+                        console.error('Error:', error);
+                    });
+            }
+
+            function showDiscountSuccess(data) {
+                // ซ่อน error
+                document.getElementById('discountError').style.display = 'none';
+
+                // แสดงผลลัพธ์
+                const preview = document.getElementById('discountPreview');
+                const message = document.getElementById('discountMessage');
+                const info = document.getElementById('discountInfo');
+
+                message.innerHTML = `จาก <span class="line-through">${data.original_points} Point</span> → <span class="text-green-600 text-xl">${data.final_points} Point</span> (ประหยัด ${data.points_saved} Point!)`;
+                info.innerHTML = `ส่วนลด ${data.discount_percent}% | ใช้ได้อีก ${data.remaining_uses}/${data.max_uses} ครั้ง`;
+
+                preview.style.display = 'block';
+
+                // Scroll to preview
+                preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            function showDiscountError(message) {
+                // ซ่อน preview
+                document.getElementById('discountPreview').style.display = 'none';
+
+                // แสดง error
+                const errorDiv = document.getElementById('discountError');
+                const errorMsg = document.getElementById('errorMessage');
+
+                errorMsg.innerHTML = message;
+                errorDiv.style.display = 'block';
+
+                // Scroll to error
+                errorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            function clearDiscount() {
+                document.getElementById('discountPreview').style.display = 'none';
+                document.getElementById('discountError').style.display = 'none';
+                document.getElementById('discountCodeInput').value = '';
+                selectedPoints = 0;
+            }
+
+            // Function to add discount code to form before submission
+            function addDiscountCode(form) {
+                const discountInput = document.getElementById('discountCodeInput');
+                const discountField = form.querySelector('.discount-code-field');
+                if (discountInput && discountField) {
+                    discountField.value = discountInput.value.toUpperCase().trim();
+                }
+                return true; // Allow form submission
             }
 
             window.addEventListener('load', function () {
