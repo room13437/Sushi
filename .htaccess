@@ -35,44 +35,44 @@ ServerSignature Off
 # ----------------------------------------------------
 
 # Block SQL Injection attempts
-RewriteCond %{QUERY_STRING} (union|select|insert|drop|update|delete|concat|declare|exec|script) [NC,OR]
+RewriteCond %{QUERY_STRING} (union|select|insert|drop|update|concat|declare|exec|script) [NC,OR]
 RewriteCond %{QUERY_STRING} ([a-z0-9]{2000,}) [NC,OR]
 RewriteCond %{QUERY_STRING} (javascript|alert|document\.cookie) [NC,OR]
 RewriteCond %{QUERY_STRING} (<|%3C).*script.*(>|%3E) [NC,OR]
 RewriteCond %{QUERY_STRING} (\\x00|\\x08|\\x09|\\x0a|\\x0b|\\x0c|\\x0d) [NC]
-RewriteRule ^(.*)$ / [R=302,L]
+RewriteRule ^(.*)$ /? [R=302,L]
 
 # Block file injection attempts
 RewriteCond %{QUERY_STRING} [a-zA-Z0-9_]=http:// [OR]
 RewriteCond %{QUERY_STRING} [a-zA-Z0-9_]=(\.\.//?)+ [OR]
 RewriteCond %{QUERY_STRING} [a-zA-Z0-9_]=/([a-z0-9_.]//?)+ [NC]
-RewriteRule ^(.*)$ / [R=302,L]
+RewriteRule ^(.*)$ /? [R=302,L]
 
 # Block directory traversal
 RewriteCond %{QUERY_STRING} (\.\./|\.\.) [NC,OR]
 RewriteCond %{REQUEST_URI} (\.\./) [NC]
-RewriteRule ^(.*)$ / [R=302,L]
+RewriteRule ^(.*)$ /? [R=302,L]
 
 # Block PHP code injection
 RewriteCond %{QUERY_STRING} (<\?php|<%|%3C%3F) [NC,OR]
 RewriteCond %{QUERY_STRING} (globals|encode|config|localhost|loopback) [NC,OR]
 RewriteCond %{QUERY_STRING} (request|mosconfig) [NC]
-RewriteRule ^(.*)$ / [R=302,L]
+RewriteRule ^(.*)$ /? [R=302,L]
 
 # Block common exploit strings
 RewriteCond %{QUERY_STRING} (base64_encode|base64_decode) [NC,OR]
 RewriteCond %{QUERY_STRING} (benchmark|sleep|load_file) [NC,OR]
 RewriteCond %{QUERY_STRING} (null|nullptr|waitfor) [NC]
-RewriteRule ^(.*)$ / [R=302,L]
+RewriteRule ^(.*)$ /? [R=302,L]
 
 # Block bad user agents (bots/scrapers)
 RewriteCond %{HTTP_USER_AGENT} (libwww|wget|curl|nikto|scan|sqlmap|acunetix) [NC,OR]
 RewriteCond %{HTTP_USER_AGENT} (HTTrack|clshttp|archiver|loader|email|harvest|extract) [NC]
-RewriteRule ^(.*)$ / [R=302,L]
+RewriteRule ^(.*)$ /? [R=302,L]
 
 # Block access to wp-admin (common target even for non-WP sites)
 RewriteCond %{REQUEST_URI} (wp-admin|wp-login|xmlrpc) [NC]
-RewriteRule ^(.*)$ / [R=302,L]
+RewriteRule ^(.*)$ /? [R=302,L]
 
 # ----------------------------------------------------
 # 📝 CUSTOM ERROR HANDLING

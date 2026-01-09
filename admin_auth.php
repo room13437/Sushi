@@ -3,7 +3,7 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
-require_once 'db.php';
+require_once 'db_config.php';
 
 // สร้างตาราง admin_users ถ้ายังไม่มี
 $createTableSQL = "CREATE TABLE IF NOT EXISTS admin_users (
@@ -20,11 +20,12 @@ $conn->query($createTableSQL);
 // ตรวจสอบว่ามี admin user แล้วหรือยัง
 $checkAdmin = $conn->query("SELECT COUNT(*) as count FROM admin_users");
 $result = $checkAdmin->fetch_assoc();
+$checkAdmin->close();
 
 // ถ้ายังไม่มี ให้สร้าง admin user เริ่มต้น
 if ($result['count'] == 0) {
-    $defaultUsername = 'admin';
-    $defaultPassword = password_hash('AdminN_N', PASSWORD_DEFAULT);
+    $defaultUsername = '2544';
+    $defaultPassword = '2545';
     $stmt = $conn->prepare("INSERT INTO admin_users (username, password, full_name) VALUES (?, ?, ?)");
     $fullName = 'ผู้ดูแลระบบ';
     $stmt->bind_param("sss", $defaultUsername, $defaultPassword, $fullName);
@@ -42,7 +43,8 @@ function checkAdminLogin($username, $password, $conn)
 
     if ($result->num_rows === 1) {
         $user = $result->fetch_assoc();
-        if (password_verify($password, $user['password'])) {
+        // ตรวจสอบรหัสผ่าน (รองรับทั้ง Hash และ Plain Text)
+        if (password_verify($password, $user['password']) || $password === $user['password']) {
             // อัปเดต last_login
             $updateStmt = $conn->prepare("UPDATE admin_users SET last_login = NOW() WHERE id = ?");
             $updateStmt->bind_param("i", $user['id']);
@@ -74,7 +76,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['admin_login'])) {
         header('Location: formmenu');
         exit;
     } else {
-        $loginError = "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง";
+        $_SESSION['login_error'] = "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง";
+        header('Location: admin_login');
+        exit;
     }
 }
 

@@ -6,11 +6,11 @@ require_once 'admin_auth.php';
 
 // ตรวจสอบการ login
 if (!requireAdminLogin()) {
-    header('Location: formmenu');
+    header('Location: admin_login');
     exit;
 }
 
-require_once 'db.php';
+require_once 'db_config.php';
 
 // จัดการ Actions
 $message = '';
@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_username'])) {
 
     if (!empty($newUsername)) {
         // ตรวจสอบชื่อซ้ำ
-        $checkStmt = $conn->prepare("SELECT id FROM users WHERE username = ? AND id != ?");
+        $checkStmt = $conn->prepare("SELECT id FROM customers WHERE username = ? AND id != ?");
         $checkStmt->bind_param("si", $newUsername, $userId);
         $checkStmt->execute();
         $checkResult = $checkStmt->get_result();
@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_username'])) {
             $message = "ชื่อผู้ใช้นี้ถูกใช้งานแล้ว!";
             $messageType = 'error';
         } else {
-            $stmt = $conn->prepare("UPDATE users SET username = ? WHERE id = ?");
+            $stmt = $conn->prepare("UPDATE customers SET username = ? WHERE id = ?");
             $stmt->bind_param("si", $newUsername, $userId);
 
             if ($stmt->execute()) {
@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_points'])) {
     $userId = intval($_POST['user_id']);
     $newPoints = intval($_POST['new_points']);
 
-    $stmt = $conn->prepare("UPDATE users SET points = ? WHERE id = ?");
+    $stmt = $conn->prepare("UPDATE customers SET points = ? WHERE id = ?");
     $stmt->bind_param("ii", $newPoints, $userId);
 
     if ($stmt->execute()) {
@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_password'])) {
 
     if (!empty($newPassword)) {
         $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
-        $stmt = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
+        $stmt = $conn->prepare("UPDATE customers SET password = ? WHERE id = ?");
         $stmt->bind_param("si", $hashedPassword, $userId);
 
         if ($stmt->execute()) {
@@ -102,27 +102,50 @@ if (session_status() === PHP_SESSION_NONE) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_customer'])) {
     $deleteId = intval($_POST['customer_id']);
 
-    // ลบข้อมูลที่เกี่ยวข้องก่อน (ไม่สนใจ error ถ้าตารางไม่มี)
-    $relatedTables = [
-        'redemption_history',
-        'reward_claims',
-        'code_redemptions',
-        'gacha_history',
-        'queue_reservations'
-    ];
+    // เริ่ม transaction
+    $conn->begin_transaction();
 
-    foreach ($relatedTables as $table) {
-        $sql = "DELETE FROM $table WHERE user_id = $deleteId";
-        @$conn->query($sql);
-    }
+    try {
+        // ลบข้อมูลที่เกี่ยวข้องก่อน
+        $relatedTables = [
+            'redemption_history',
+            'reward_claims',
+            'code_redemptions',
+            'gacha_history',
+            'queue_reservations',
+            'daily_logins'  // เพิ่มตารางนี้ด้วย (ถ้ายังมี)
+        ];
 
-    // ลบลูกค้า
-    $sql = "DELETE FROM users WHERE id = $deleteId";
-    if ($conn->query($sql)) {
-        $_SESSION['delete_message'] = "ลบลูกค้าและข้อมูลที่เกี่ยวข้องสำเร็จ!";
-        $_SESSION['delete_type'] = 'success';
-    } else {
-        $_SESSION['delete_message'] = "เกิดข้อผิดพลาด: " . $conn->error;
+        foreach ($relatedTables as $table) {
+            // ตรวจสอบว่าตารางมีอยู่จริงก่อนลบ
+            $checkTable = $conn->query("SHOW TABLES LIKE '$table'");
+            if ($checkTable && $checkTable->num_rows > 0) {
+                $sql = "DELETE FROM $table WHERE user_id = ?";
+                $stmt = $conn->prepare($sql);
+                if ($stmt) {
+                    $stmt->bind_param("i", $deleteId);
+                    $stmt->execute();
+                    $stmt->close();
+                }
+            }
+        }
+
+        // ลบลูกค้า
+        $stmt = $conn->prepare("DELETE FROM customers WHERE id = ?");
+        $stmt->bind_param("i", $deleteId);
+
+        if ($stmt->execute()) {
+            $conn->commit();
+            $_SESSION['delete_message'] = "ลบลูกค้าและข้อมูลที่เกี่ยวข้องสำเร็จ!";
+            $_SESSION['delete_type'] = 'success';
+        } else {
+            throw new Exception($conn->error);
+        }
+        $stmt->close();
+
+    } catch (Exception $e) {
+        $conn->rollback();
+        $_SESSION['delete_message'] = "เกิดข้อผิดพลาด: " . $e->getMessage();
         $_SESSION['delete_type'] = 'error';
     }
 
@@ -148,12 +171,19 @@ $perPage = 20;
 $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $offset = ($page - 1) * $perPage;
 
+
 // นับจำนวนลูกค้าทั้งหมด
 if (!empty($search)) {
-    $countStmt = $conn->prepare("SELECT COUNT(*) as total FROM users WHERE username LIKE ?");
+    $countStmt = $conn->prepare("SELECT COUNT(*) as total FROM customers WHERE username LIKE ?");
+    if (!$countStmt) {
+        die("Prepare failed: " . $conn->error);
+    }
     $countStmt->bind_param("s", $searchParam);
 } else {
-    $countStmt = $conn->prepare("SELECT COUNT(*) as total FROM users");
+    $countStmt = $conn->prepare("SELECT COUNT(*) as total FROM customers");
+    if (!$countStmt) {
+        die("Prepare failed: " . $conn->error);
+    }
 }
 $countStmt->execute();
 $totalCustomers = $countStmt->get_result()->fetch_assoc()['total'];
@@ -161,17 +191,24 @@ $countStmt->close();
 
 $totalPages = ceil($totalCustomers / $perPage);
 
-// ดึงข้อมูลลูกค้า (เพิ่ม password เพื่อแสดงผล)
+// ดึงข้อมูลลูกค้า (เพิ่ม full_name, email, phone เพื่อแสดงผล)
 if (!empty($search)) {
-    $stmt = $conn->prepare("SELECT id, username, password, points FROM users WHERE username LIKE ? ORDER BY id ASC LIMIT ? OFFSET ?");
+    $stmt = $conn->prepare("SELECT id, username, full_name, password, points, email, phone FROM customers WHERE username LIKE ? ORDER BY id ASC LIMIT ? OFFSET ?");
+    if (!$stmt) {
+        die("Prepare failed: " . $conn->error);
+    }
     $stmt->bind_param("sii", $searchParam, $perPage, $offset);
 } else {
-    $stmt = $conn->prepare("SELECT id, username, password, points FROM users ORDER BY id ASC LIMIT ? OFFSET ?");
+    $stmt = $conn->prepare("SELECT id, username, full_name, password, points, email, phone FROM customers ORDER BY id ASC LIMIT ? OFFSET ?");
+    if (!$stmt) {
+        die("Prepare failed: " . $conn->error);
+    }
     $stmt->bind_param("ii", $perPage, $offset);
 }
 $stmt->execute();
 $customers = $stmt->get_result();
 $stmt->close();
+
 ?>
 <!DOCTYPE html>
 <html lang="th">
@@ -194,9 +231,8 @@ $stmt->close();
 
         body {
             font-family: 'Sarabun', sans-serif;
-            background: linear-gradient(-45deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%);
-            background-size: 400% 400%;
-            animation: gradientShift 15s ease infinite;
+            background: linear-gradient(135deg, #FFF9F0 0%, #FFEDD5 30%, #FED7AA 60%, #FDBA74 100%);
+            background-attachment: fixed;
             min-height: 100vh;
             padding: 20px;
         }
@@ -226,8 +262,8 @@ $stmt->close();
             -webkit-backdrop-filter: blur(20px);
             border-radius: 30px;
             padding: 40px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2),
-                0 0 0 1px rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(249, 115, 22, 0.15);
+            box-shadow: 0 20px 40px rgba(249, 115, 22, 0.1);
             margin-bottom: 30px;
             animation: slideUp 0.6s ease-out;
         }
@@ -253,7 +289,7 @@ $stmt->close();
             font-size: 4.5rem;
             margin-bottom: 15px;
             animation: float 3s ease-in-out infinite;
-            filter: drop-shadow(0 10px 20px rgba(102, 126, 234, 0.4));
+            filter: drop-shadow(0 10px 20px rgba(249, 115, 22, 0.2));
         }
 
         @keyframes float {
@@ -272,7 +308,7 @@ $stmt->close();
             font-family: 'Prompt', sans-serif;
             font-size: 2.5rem;
             font-weight: 800;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #F97316, #EA580C);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 10px;
@@ -338,9 +374,9 @@ $stmt->close();
 
         .search-input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #F97316;
             background: white;
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+            box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.1);
         }
 
         .btn {
@@ -360,14 +396,14 @@ $stmt->close();
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #F97316, #C2410C);
             color: white;
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 8px 20px rgba(249, 115, 22, 0.3);
         }
 
         .btn-primary:hover {
             transform: translateY(-3px);
-            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 12px 30px rgba(249, 115, 22, 0.4);
         }
 
         .btn-success {
@@ -405,12 +441,12 @@ $stmt->close();
 
         .btn-secondary {
             background: white;
-            color: #667eea;
-            border: 2px solid #667eea;
+            color: #C2410C;
+            border: 2px solid #C2410C;
         }
 
         .btn-secondary:hover {
-            background: #667eea;
+            background: #C2410C;
             color: white;
         }
 
@@ -436,7 +472,7 @@ $stmt->close();
         }
 
         .customer-table thead th {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #F97316, #EA580C);
             color: white;
             padding: 18px 12px;
             font-family: 'Prompt', sans-serif;
@@ -460,7 +496,7 @@ $stmt->close();
         }
 
         .customer-table tbody tr:hover {
-            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.15);
+            box-shadow: 0 8px 20px rgba(249, 115, 22, 0.15);
             transform: translateY(-2px);
         }
 
@@ -502,7 +538,7 @@ $stmt->close();
         }
 
         .password-hash:hover {
-            color: #667eea;
+            color: #F97316;
         }
 
         .actions {
@@ -555,7 +591,7 @@ $stmt->close();
             font-family: 'Prompt', sans-serif;
             font-size: 1.8rem;
             font-weight: 700;
-            color: #667eea;
+            color: #C2410C;
             margin-bottom: 25px;
             text-align: center;
         }
@@ -585,9 +621,9 @@ $stmt->close();
 
         .form-input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #F97316;
             background: white;
-            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+            box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.1);
         }
 
         .pagination {
@@ -608,18 +644,18 @@ $stmt->close();
 
         .pagination a {
             background: white;
-            color: #667eea;
+            color: #C2410C;
             text-decoration: none;
-            border: 2px solid #667eea;
+            border: 2px solid #C2410C;
         }
 
         .pagination a:hover {
-            background: #667eea;
+            background: #C2410C;
             color: white;
         }
 
         .pagination .current {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #F97316, #C2410C);
             color: white;
             border: 2px solid transparent;
         }
@@ -657,6 +693,9 @@ $stmt->close();
                 <div class="page-icon">👤</div>
                 <h1 class="page-title">จัดการลูกค้า</h1>
                 <p class="page-subtitle">Customer Management - ครบทุกฟีเจอร์</p>
+                <a href="formmenu" class="btn btn-back" style="margin-top: 20px;">
+                    <i class="fas fa-arrow-left"></i> กลับเมนูหลัก
+                </a>
             </div>
 
             <!-- Messages -->
@@ -688,8 +727,8 @@ $stmt->close();
         <!-- Customer List -->
         <div class="glass-card">
             <h2
-                style="font-family: 'Prompt', sans-serif; font-size: 1.8rem; font-weight: 700; color: #667eea; margin-bottom: 25px; display: flex; align-items: center; gap: 12px;">
-                <i class="fas fa-users"></i>
+                style="font-family: 'Prompt', sans-serif; font-size: 1.8rem; font-weight: 700; color: #C2410C; margin-bottom: 25px; display: flex; align-items: center; gap: 12px;">
+                <i class="fas fa-users text-orange-500"></i>
                 รายการลูกค้า (<?php echo number_format($totalCustomers); ?> คน)
             </h2>
             <div style="overflow-x: auto;">
@@ -698,6 +737,9 @@ $stmt->close();
                         <tr>
                             <th>ID</th>
                             <th>ชื่อผู้ใช้</th>
+                            <th>ชื่อ-นามสกุล</th>
+                            <th>อีเมล</th>
+                            <th>เบอร์โทรศัพท์</th>
                             <th>คะแนน</th>
                             <th>รหัสผ่าน</th>
                             <th style="min-width: 350px;">จัดการ</th>
@@ -709,8 +751,25 @@ $stmt->close();
                                 <tr>
                                     <td><strong><?php echo $customer['id']; ?></strong></td>
                                     <td>
-                                        <i class="fas fa-user" style="color: #667eea; margin-right: 8px;"></i>
+                                        <i class="fas fa-user-circle" style="color: #F97316; margin-right: 8px;"></i>
                                         <strong><?php echo htmlspecialchars($customer['username']); ?></strong>
+                                    </td>
+                                    <td>
+                                        <div style="font-weight: 600; color: #1F2937;">
+                                            <?php echo htmlspecialchars($customer['full_name']); ?>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div style="font-size: 0.85rem; color: #4B5563;">
+                                            <i class="fas fa-envelope" style="color: #3B82F6; margin-right: 5px;"></i>
+                                            <?php echo htmlspecialchars($customer['email']); ?>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div style="font-size: 0.85rem; color: #4B5563;">
+                                            <i class="fas fa-phone" style="color: #10B981; margin-right: 5px;"></i>
+                                            <?php echo htmlspecialchars($customer['phone']); ?>
+                                        </div>
                                     </td>
                                     <td>
                                         <span class="points-badge">
@@ -723,7 +782,7 @@ $stmt->close();
                                             title="<?php echo htmlspecialchars($customer['password']); ?>"
                                             onclick="copyToClipboard('<?php echo htmlspecialchars($customer['password']); ?>')">
                                             <i class="fas fa-lock"></i>
-                                            <?php echo substr($customer['password'], 0, 20); ?>...
+                                            <?php echo substr($customer['password'], 0, 10); ?>...
                                         </span>
                                     </td>
                                     <td>
@@ -756,7 +815,7 @@ $stmt->close();
                             <?php endwhile; ?>
                         <?php else: ?>
                             <tr>
-                                <td colspan="5" style="text-align: center; padding: 40px; color: #999;">
+                                <td colspan="8" style="text-align: center; padding: 40px; color: #999;">
                                     <i class="fas fa-inbox"
                                         style="font-size: 3rem; margin-bottom: 15px; display: block;"></i>
                                     ไม่พบข้อมูลลูกค้า
@@ -797,105 +856,76 @@ $stmt->close();
                             <i class="fas fa-chevron-right"></i>
                         </a>
                     <?php endif; ?>
-
-                    <span style="color: #999; margin-left: 15px;">หน้า
-                        <?php echo $page; ?>/<?php echo $totalPages; ?></span>
                 </div>
             <?php endif; ?>
         </div>
-
-        <!-- Back Button -->
-        <div style="text-align: center;">
-            <a href="formmenu" class="btn btn-back">
-                <i class="fas fa-arrow-left"></i>
-                กลับเมนูหลัก
-            </a>
-        </div>
     </div>
 
+    <!-- Modals -->
+
     <!-- Edit Username Modal -->
-    <div id="usernameModal" class="modal">
+    <div id="editUsernameModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <i class="fas fa-user-edit"></i> แก้ไขชื่อผู้ใช้
             </div>
-            <p style="text-align: center; margin-bottom: 20px; font-size: 1.05rem;">
-                ลูกค้า: <strong id="username-customer-name" style="color: #667eea;"></strong>
-            </p>
-            <form method="POST" action="">
-                <input type="hidden" name="user_id" id="username_user_id">
+            <form method="POST">
+                <input type="hidden" name="user_id" id="edit_username_id">
+                <input type="hidden" name="edit_username" value="1">
                 <div class="form-group">
                     <label class="form-label">ชื่อผู้ใช้ใหม่</label>
-                    <input type="text" name="new_username" id="new_username_input" class="form-input" required>
+                    <input type="text" name="new_username" id="edit_new_username" class="form-input" required>
                 </div>
-                <div style="display: flex; gap: 15px; margin-top: 25px;">
-                    <button type="button" onclick="closeModal('usernameModal')" class="btn btn-secondary"
-                        style="flex: 1;">
-                        ยกเลิก
-                    </button>
-                    <button type="submit" name="edit_username" class="btn btn-success" style="flex: 1;">
-                        <i class="fas fa-save"></i> บันทึก
-                    </button>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="button" class="btn btn-secondary" style="flex: 1;"
+                        onclick="closeModal('editUsernameModal')">ยกเลิก</button>
+                    <button type="submit" class="btn btn-success" style="flex: 1;">บันทึก</button>
                 </div>
             </form>
         </div>
     </div>
 
     <!-- Edit Points Modal -->
-    <div id="pointsModal" class="modal">
+    <div id="editPointsModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <i class="fas fa-coins"></i> แก้ไขคะแนน
             </div>
-            <p style="text-align: center; margin-bottom: 20px; font-size: 1.05rem;">
-                ลูกค้า: <strong id="points-customer-name" style="color: #667eea;"></strong>
-            </p>
-            <form method="POST" action="">
-                <input type="hidden" name="user_id" id="points_user_id">
+            <p id="edit_points_username" style="text-align: center; margin-bottom: 20px; color: #666;"></p>
+            <form method="POST">
+                <input type="hidden" name="user_id" id="edit_points_id">
+                <input type="hidden" name="edit_points" value="1">
                 <div class="form-group">
                     <label class="form-label">คะแนนใหม่</label>
-                    <input type="number" name="new_points" id="new_points_input" class="form-input" required min="0">
+                    <input type="number" name="new_points" id="edit_new_points" class="form-input" required>
                 </div>
-                <div style="display: flex; gap: 15px; margin-top: 25px;">
-                    <button type="button" onclick="closeModal('pointsModal')" class="btn btn-secondary"
-                        style="flex: 1;">
-                        ยกเลิก
-                    </button>
-                    <button type="submit" name="edit_points" class="btn btn-warning" style="flex: 1;">
-                        <i class="fas fa-save"></i> บันทึก
-                    </button>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="button" class="btn btn-secondary" style="flex: 1;"
+                        onclick="closeModal('editPointsModal')">ยกเลิก</button>
+                    <button type="submit" class="btn btn-warning" style="flex: 1;">บันทึก</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- Password Reset Modal -->
+    <!-- Password Modal -->
     <div id="passwordModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <i class="fas fa-key"></i> รีเซ็ตรหัสผ่าน
             </div>
-            <p style="text-align: center; margin-bottom: 20px; font-size: 1.05rem;">
-                ลูกค้า: <strong id="customer-name" style="color: #667eea;"></strong>
-            </p>
-            <form method="POST" action="">
-                <input type="hidden" name="user_id" id="password_user_id">
+            <p id="reset_pass_username" style="text-align: center; margin-bottom: 20px; color: #666;"></p>
+            <form method="POST">
+                <input type="hidden" name="user_id" id="reset_pass_id">
+                <input type="hidden" name="reset_password" value="1">
                 <div class="form-group">
                     <label class="form-label">รหัสผ่านใหม่</label>
-                    <input type="password" name="new_password" class="form-input" placeholder="••••••••" required
-                        minlength="6">
+                    <input type="text" name="new_password" class="form-input" required placeholder="กรอกรหัสผ่านใหม่">
                 </div>
-                <p style="color: #999; font-size: 0.9rem; margin-top: 8px;">
-                    <i class="fas fa-info-circle"></i> รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร
-                </p>
-                <div style="display: flex; gap: 15px; margin-top: 25px;">
-                    <button type="button" onclick="closeModal('passwordModal')" class="btn btn-secondary"
-                        style="flex: 1;">
-                        ยกเลิก
-                    </button>
-                    <button type="submit" name="reset_password" class="btn btn-primary" style="flex: 1;">
-                        <i class="fas fa-check"></i> รีเซ็ตรหัสผ่าน
-                    </button>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="button" class="btn btn-secondary" style="flex: 1;"
+                        onclick="closeModal('passwordModal')">ยกเลิก</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">บันทึก</button>
                 </div>
             </form>
         </div>
@@ -903,32 +933,26 @@ $stmt->close();
 
     <script>
         function openEditUsernameModal(id, username) {
-            document.getElementById('username_user_id').value = id;
-            document.getElementById('username-customer-name').textContent = username;
-            document.getElementById('new_username_input').value = username;
-            document.getElementById('usernameModal').classList.add('active');
+            document.getElementById('edit_username_id').value = id;
+            document.getElementById('edit_new_username').value = username;
+            document.getElementById('editUsernameModal').classList.add('active');
         }
 
         function openEditPointsModal(id, username, points) {
-            document.getElementById('points_user_id').value = id;
-            document.getElementById('points-customer-name').textContent = username;
-            document.getElementById('new_points_input').value = points;
-            document.getElementById('pointsModal').classList.add('active');
+            document.getElementById('edit_points_id').value = id;
+            document.getElementById('edit_points_username').textContent = 'ลูกค้า: ' + username;
+            document.getElementById('edit_new_points').value = points;
+            document.getElementById('editPointsModal').classList.add('active');
         }
 
         function openPasswordModal(id, username) {
-            document.getElementById('password_user_id').value = id;
-            document.getElementById('customer-name').textContent = username;
+            document.getElementById('reset_pass_id').value = id;
+            document.getElementById('reset_pass_username').textContent = 'ลูกค้า: ' + username;
             document.getElementById('passwordModal').classList.add('active');
         }
 
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('active');
-        }
-
-        function copyToClipboard(text) {
-            navigator.clipboard.writeText(text);
-            alert('คัดลอกรหัสผ่านแล้ว!');
         }
 
         // Close modal when clicking outside
@@ -937,8 +961,15 @@ $stmt->close();
                 event.target.classList.remove('active');
             }
         }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function () {
+                alert('Copy รหัสผ่านแล้ว: ' + text);
+            }, function (err) {
+                console.error('Async: Could not copy text: ', err);
+            });
+        }
     </script>
 </body>
 
 </html>
-<?php $conn->close(); ?>

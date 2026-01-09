@@ -1,112 +1,22 @@
 <?php
-// เริ่ม Session เพื่อรับข้อมูลที่ส่งมาจากการบันทึก (Flash Message)
+// เริ่ม Session
 session_start();
 
-// ตั้งค่า Timezone เป็นประเทศไทย
+// ตั้งค่า Timezone
 date_default_timezone_set('Asia/Bangkok');
 
-// กำหนดค่าการเชื่อมต่อฐานข้อมูล
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "products";
-
-// สร้างการเชื่อมต่อ
-$conn = new mysqli($servername, $username, $password, $dbname);
+// นำเข้าการเชื่อมต่อฐานข้อมูล
+require_once 'db_config.php';
 
 // ตรวจสอบการเชื่อมต่อ
+$connection_error = null;
 if ($conn->connect_error) {
     $connection_error = "Connection failed: " . $conn->connect_error;
-    $conn = null;
-} else {
-    $connection_error = null;
 }
 
-// รับค่าคำค้นหาจาก GET parameter
+// รับค่าคำค้นหา
 $search_term = isset($_GET['search']) ? trim($_GET['search']) : '';
 $search_query_param = "%" . $search_term . "%";
-
-// --- FETCH QUEUE DATA (Mini Board) ---
-$conn_q = new mysqli("localhost", "root", "", "queue_system");
-$queue_data = [];
-if (!$conn_q->connect_error) {
-    $today = date('Y-m-d');
-    $sql_q = "SELECT queue_number, customer_name, status, created_at FROM daily_queue 
-              WHERE queue_date = '$today' AND status = 'Waiting' 
-              ORDER BY queue_number ASC LIMIT 5";
-    $result_q = $conn_q->query($sql_q);
-    if ($result_q) {
-        while ($row = $result_q->fetch_assoc()) {
-            $queue_data[] = $row;
-        }
-    }
-    $conn_q->close();
-}
-
-// --- FETCH PROMOTIONS ---
-$promotions = [];
-if ($conn && $connection_error === null) {
-    $sql_promo = "SELECT * FROM promotions ORDER BY id DESC";
-    $result_promo = $conn->query($sql_promo);
-    if ($result_promo) {
-        while ($row = $result_promo->fetch_assoc()) {
-            $promotions[] = $row;
-        }
-    }
-}
-
-// --- FETCH STORE HOURS ---
-$store_open_time = '11:00';
-$store_close_time = '22:00';
-$store_status = 'OPEN'; // Manual override status
-
-if ($conn && $connection_error === null) {
-    $sql_hours = "SELECT setting_key, setting_value FROM store_settings WHERE setting_key IN ('store_open_time', 'store_close_time', 'store_status')";
-    $result_hours = $conn->query($sql_hours);
-    if ($result_hours) {
-        while ($row = $result_hours->fetch_assoc()) {
-            if ($row['setting_key'] === 'store_open_time') {
-                $store_open_time = $row['setting_value'];
-            } elseif ($row['setting_key'] === 'store_close_time') {
-                $store_close_time = $row['setting_value'];
-            } elseif ($row['setting_key'] === 'store_status') {
-                $store_status = $row['setting_value'];
-            }
-        }
-    }
-}
-
-// --- CHECK IF STORE IS OPEN ---
-$current_time = date('H:i');
-$is_store_open = false;
-$store_status_text = 'ร้านปิดอยู่';
-$store_status_icon = '🔴';
-$store_status_color = 'bg-red-500';
-$show_hours = false; // Control hours visibility
-
-// Check manual status first
-if ($store_status === 'CLOSED') {
-    // Manually closed - show closed status, hide hours
-    $is_store_open = false;
-    $store_status_text = 'ร้านปิดอยู่';
-    $store_status_icon = '🔴';
-   $store_status_color = 'bg-red-500';
-    $show_hours = false;
-} elseif ($store_status === 'OPEN') {
-    // Manually open - check time to determine status and show hours
-    $show_hours = true;
-    if ($current_time >= $store_open_time && $current_time <= $store_close_time) {
-        $is_store_open = true;
-        $store_status_text = 'ร้านเปิดอยู่';
-        $store_status_icon = '🟢';
-        $store_status_color = 'bg-green-500';
-    } else {
-        $is_store_open = false;
-        $store_status_text = 'ร้านปิดอยู่';
-        $store_status_icon = '🔴';
-        $store_status_color = 'bg-red-500';
-    }
-}
 
 // === Visitor Counter Logic ===
 $counter_file = 'visitor_count.txt';
@@ -122,60 +32,115 @@ if (!isset($_SESSION['has_visited'])) {
     $current_visitors = (int) file_get_contents($counter_file);
 }
 
+// === Member Counter Logic ===
+$member_count = 0;
+if ($conn && !$conn->connect_error) {
+    $count_sql = "SELECT COUNT(*) as total FROM customers";
+    $count_result = $conn->query($count_sql);
+    if ($count_result) {
+        $row = $count_result->fetch_assoc();
+        $member_count = $row['total'];
+    }
+}
+
+// === Store Hours Logic ===
+$store_open_time = '10:00';
+$store_close_time = '20:00';
+$manual_override = 'auto';
+$is_store_open = false;
+$store_status_text = '';
+$store_status_color = '';
+
+if ($conn && !$conn->connect_error) {
+    $store_result = $conn->query("SELECT setting_key, setting_value FROM store_settings WHERE setting_key IN ('store_open_time', 'store_close_time', 'manual_override')");
+    if ($store_result) {
+        while ($store_row = $store_result->fetch_assoc()) {
+            if ($store_row['setting_key'] == 'store_open_time') {
+                $store_open_time = $store_row['setting_value'];
+            } elseif ($store_row['setting_key'] == 'store_close_time') {
+                $store_close_time = $store_row['setting_value'];
+            } elseif ($store_row['setting_key'] == 'manual_override') {
+                $manual_override = $store_row['setting_value'];
+            }
+        }
+    }
+}
+
+// Calculate store status
+$current_time = date('H:i');
+if ($manual_override == 'force_open') {
+    $is_store_open = true;
+    $store_status_text = 'เปิดทำการ';
+    $store_status_color = '#10b981';
+} elseif ($manual_override == 'force_closed') {
+    $is_store_open = false;
+    $store_status_text = 'ปิดทำการ';
+    $store_status_color = '#ef4444';
+} else {
+    // Auto mode - check time
+    if ($current_time >= $store_open_time && $current_time < $store_close_time) {
+        $is_store_open = true;
+        $store_status_text = 'เปิดทำการ';
+        $store_status_color = '#10b981';
+    } else {
+        $is_store_open = false;
+        $store_status_text = 'ปิดทำการ';
+        $store_status_color = '#ef4444';
+    }
+}
+
+
 // ฟังก์ชันสำหรับกำหนดหมวดหมู่จากชื่อสินค้า (สำหรับซูชิ)
 function categorizeProduct($productName)
 {
     $nameLower = mb_strtolower($productName, 'UTF-8');
-    
+
     // ซูชิหน้าดิบ (Nigiri & Sashimi)
-    if (strpos($nameLower, 'ซาชิมิ') !== false || strpos($nameLower, 'sashimi') !== false || 
+    if (
+        strpos($nameLower, 'ซาชิมิ') !== false || strpos($nameLower, 'sashimi') !== false ||
         strpos($nameLower, 'นิกิริ') !== false || strpos($nameLower, 'nigiri') !== false ||
-        strpos($nameLower, 'ปลาดิบ') !== false) {
+        strpos($nameLower, 'ปลาดิบ') !== false
+    ) {
         return 'ซาชิมิ & นิกิริ';
     }
-    
+
     // ซูชิม้วน (Maki & Roll)
-    if (strpos($nameLower, 'มากิ') !== false || strpos($nameLower, 'maki') !== false || 
+    if (
+        strpos($nameLower, 'มากิ') !== false || strpos($nameLower, 'maki') !== false ||
         strpos($nameLower, 'โรล') !== false || strpos($nameLower, 'roll') !== false ||
-        strpos($nameLower, 'แคลิฟอร์เนีย') !== false || strpos($nameLower, 'california') !== false) {
+        strpos($nameLower, 'แคลิฟอร์เนีย') !== false || strpos($nameLower, 'california') !== false
+    ) {
         return 'มากิ & โรล';
     }
-    
+
     // เมนูทอด & เมนูร้อน
-    if (strpos($nameLower, 'ทอด') !== false || strpos($nameLower, 'เทมปุระ') !== false || 
+    if (
+        strpos($nameLower, 'ทอด') !== false || strpos($nameLower, 'เทมปุระ') !== false ||
         strpos($nameLower, 'tempura') !== false || strpos($nameLower, 'ไก่ทอด') !== false ||
-        strpos($nameLower, 'ทาโกะยากิ') !== false || strpos($nameLower, 'ทาโก้') !== false) {
+        strpos($nameLower, 'ทาโกะยากิ') !== false || strpos($nameLower, 'ทาโก้') !== false
+    ) {
         return 'เมนูทอด & เมนูร้อน';
     }
-    
+
     // เครื่องดื่ม & ของหวาน
-    if (strpos($nameLower, 'ชาเขียว') !== false || strpos($nameLower, 'โมจิ') !== false || 
+    if (
+        strpos($nameLower, 'ชาเขียว') !== false || strpos($nameLower, 'โมจิ') !== false ||
         strpos($nameLower, 'ไอศกรีม') !== false || strpos($nameLower, 'น้ำ') !== false ||
-        strpos($nameLower, 'เครื่องดื่ม') !== false || strpos($nameLower, 'ของหวาน') !== false) {
+        strpos($nameLower, 'เครื่องดื่ม') !== false || strpos($nameLower, 'ของหวาน') !== false
+    ) {
         return 'เครื่องดื่ม & ของหวาน';
     }
-    
-    return 'เมนูอื่น ๆ';
+
+    return 'เมนูหน้าร้าน';
 }
 
 $category_order = ['ซาชิมิ & นิกิริ', 'มากิ & โรล', 'เมนูทอด & เมนูร้อน', 'เครื่องดื่ม & ของหวาน', 'เมนูอื่น ๆ'];
 $grouped_products = [];
-
-// --- FETCH STORE LOCATION ---
-$store_lat = 13.73972299;
-$store_lng = 100.48529231;
-$store_address = 'ซูชิละกัน Paradise';
-if ($conn && $connection_error === null) {
-    $result_loc = $conn->query("SELECT latitude, longitude, address FROM store_locations LIMIT 1");
-    if ($result_loc && $row_loc = $result_loc->fetch_assoc()) {
-        $store_lat = $row_loc['latitude'];
-        $store_lng = $row_loc['longitude'];
-        $store_address = $row_loc['address'];
-    }
-}
 ?>
 <!DOCTYPE html>
+
 <html lang="th" class="scroll-smooth">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -223,18 +188,16 @@ if ($conn && $connection_error === null) {
             }
         }
     </script>
-    
+
     <!-- Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=Prompt:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=Prompt:wght@400;600;700;800&display=swap"
+        rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 
     <!-- Leaflet CSS & Routing -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
-
-    <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="js/three_bg.js"></script>
 
     <style>
         #map {
@@ -242,9 +205,10 @@ if ($conn && $connection_error === null) {
             width: 100%;
             z-index: 10;
         }
+
         .leaflet-routing-container {
             background: rgba(255, 255, 255, 0.9);
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
             border-radius: 1rem;
             border: none;
             padding: 1rem;
@@ -256,10 +220,19 @@ if ($conn && $connection_error === null) {
 
     <style>
         /* Scrollbar */
-        ::-webkit-scrollbar { width: 10px; }
-        ::-webkit-scrollbar-track { background: #FFF8F0; }
-        ::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #F97316, #EA580C); border-radius: 10px; }
-        
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #FFF8F0;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #F97316, #EA580C);
+            border-radius: 10px;
+        }
+
         body {
             font-family: 'Sarabun', sans-serif;
             background: linear-gradient(180deg, #FFF9F0 0%, #FFEDD5 50%, #FED7AA 100%);
@@ -315,7 +288,7 @@ if ($conn && $connection_error === null) {
 
         /* Accordion */
         .accordion-btn {
-            background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,237,213,0.5));
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(255, 237, 213, 0.5));
             border: 2px solid rgba(249, 115, 22, 0.2);
             border-radius: 20px;
             padding: 18px 28px;
@@ -354,11 +327,20 @@ if ($conn && $connection_error === null) {
             animation: slideDown 0.4s ease;
         }
 
-        .accordion-content.show { display: block; }
+        .accordion-content.show {
+            display: block;
+        }
 
         @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* Category Grid */
@@ -374,17 +356,25 @@ if ($conn && $connection_error === null) {
             background: linear-gradient(135deg, #DC2626, #F97316);
             animation: pulse 2s ease-in-out infinite;
         }
-Z
+
+        Z
+
         /* Floating Animation */
-        .floating { animation: float 4s ease-in-out infinite; }
-        .floating-delay { animation: float 4s ease-in-out infinite 1.5s; }
+        .floating {
+            animation: float 4s ease-in-out infinite;
+        }
+
+        .floating-delay {
+            animation: float 4s ease-in-out infinite 1.5s;
+        }
     </style>
 </head>
 
 <body class="antialiased min-h-screen flex flex-col">
 
     <!-- 🍊 PREMIUM LOADER -->
-    <div id="page-loader" class="fixed inset-0 bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 z-[9999] flex flex-col justify-center items-center">
+    <div id="page-loader"
+        class="fixed inset-0 bg-gradient-to-br from-orange-400 via-orange-500 to-orange-600 z-[9999] flex flex-col justify-center items-center">
         <div class="relative">
             <div class="w-24 h-24 rounded-full border-4 border-white/30 border-t-white animate-spin"></div>
             <div class="absolute inset-0 flex items-center justify-center text-5xl animate-bounce-slow">🍣</div>
@@ -396,9 +386,13 @@ Z
     <!-- 🎀 TOP INFO BAR -->
     <div class="bg-gradient-to-r from-orange-500 to-orange-600 py-3 text-center text-white shadow-lg relative z-50">
         <div class="container mx-auto flex flex-wrap justify-center gap-6 md:gap-12 text-sm font-display">
-            <span class="flex items-center gap-2"><i class="far fa-calendar-alt"></i> <span id="current-date"></span></span>
+            <span class="flex items-center gap-2"><i class="far fa-calendar-alt"></i> <span
+                    id="current-date"></span></span>
             <span class="flex items-center gap-2"><i class="far fa-clock"></i> <span id="current-time"></span></span>
-            <span class="flex items-center gap-2"><i class="fas fa-users"></i> <?php echo number_format($current_visitors); ?> ผู้เข้าชม</span>
+            <span class="flex items-center gap-2"><i class="fas fa-users"></i>
+                <?php echo number_format($current_visitors); ?> ผู้เข้าชม</span>
+            <span class="flex items-center gap-2"><i class="fas fa-user-plus"></i>
+                <?php echo number_format($member_count); ?> สมาชิก</span>
         </div>
     </div>
 
@@ -416,227 +410,189 @@ Z
 
             <!-- Desktop Nav -->
             <ul class="hidden md:flex items-center gap-8 font-display font-semibold">
-                <li><a href="#home" class="text-orange-800 hover:text-orange-500 transition-colors py-2 flex items-center gap-2"><i class="fas fa-home"></i> หน้าแรก</a></li>
-                <li><a href="#menu" class="text-orange-800 hover:text-orange-500 transition-colors py-2 flex items-center gap-2"><i class="fas fa-utensils"></i> เมนู</a></li>
+                <li><a href="#home"
+                        class="text-orange-800 hover:text-orange-500 transition-colors py-2 flex items-center gap-2"><i
+                            class="fas fa-home"></i> หน้าแรก</a></li>
+                <li><a href="#menu"
+                        class="text-orange-800 hover:text-orange-500 transition-colors py-2 flex items-center gap-2"><i
+                            class="fas fa-utensils"></i> เมนู</a></li>
                 <li>
-                    <a href="formlogin" class="btn-orange-gradient text-white px-7 py-3 rounded-full font-bold hover:scale-105 transition-all flex items-center gap-2">
-                        <i class="fas fa-gift"></i> รับโค้ดส่วนลด
+                    <a href="login"
+                        class="btn-orange-gradient text-white px-7 py-3 rounded-full font-bold hover:scale-105 transition-all flex items-center gap-2 shadow-lg shadow-orange-500/30">
+                        <i class="fas fa-gift"></i> รับส่วนลด
                     </a>
                 </li>
             </ul>
 
+
             <!-- Mobile Menu Button -->
-            <button class="md:hidden text-3xl text-orange-500" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
+            <button class="md:hidden text-3xl text-orange-500"
+                onclick="document.getElementById('mobile-menu').classList.toggle('hidden')">
                 <i class="fas fa-bars"></i>
             </button>
         </nav>
 
         <!-- Mobile Nav -->
-        <div id="mobile-menu" class="hidden md:hidden bg-white border-t border-orange-100 p-6 flex flex-col gap-4 font-display font-bold text-center shadow-lg">
-            <a href="#home" class="py-3 text-orange-700 hover:text-orange-500 rounded-xl hover:bg-orange-50">🏠 หน้าแรก</a>
+        <div id="mobile-menu"
+            class="hidden md:hidden bg-white border-t border-orange-100 p-6 flex flex-col gap-4 font-display font-bold text-center shadow-lg">
+            <a href="#home" class="py-3 text-orange-700 hover:text-orange-500 rounded-xl hover:bg-orange-50">🏠
+                หน้าแรก</a>
             <a href="#menu" class="py-3 text-orange-700 hover:text-orange-500 rounded-xl hover:bg-orange-50">🍱 เมนู</a>
-            <a href="formlogin" class="btn-orange-gradient text-white py-4 rounded-2xl mt-2">💎 รับโค้ดส่วนลด</a>
+            <a href="login" class="btn-orange-gradient text-white py-4 rounded-2xl mt-2 shadow-lg"><i
+                    class="fas fa-gift mr-2"></i> รับส่วนลด</a>
         </div>
+
     </header>
 
+
     <!-- 🏠 HERO SECTION -->
-    <section id="home" class="relative min-h-[90vh] flex items-center justify-center text-center px-6 overflow-hidden py-16">
-        <!-- Background Decorations -->
-        <div class="absolute top-20 left-10 text-8xl opacity-30 floating hidden lg:block">🍣</div>
-        <div class="absolute bottom-24 right-16 text-7xl opacity-25 floating-delay hidden lg:block">🍤</div>
-        <div class="absolute top-1/3 right-1/4 text-6xl opacity-20 floating hidden lg:block">🥢</div>
-        <div class="absolute bottom-1/3 left-1/4 text-5xl opacity-15 floating-delay hidden lg:block">🍱</div>
+    <section id="home"
+        class="relative min-h-[90vh] flex items-center justify-center text-center px-6 overflow-hidden py-16">
+
+        <!-- VIDEO BACKGROUND -->
+        <div id="video-container" class="absolute inset-0 w-full h-full z-0">
+            <video id="hero-video" autoplay muted loop playsinline class="absolute inset-0 w-full h-full object-cover">
+                <source src="video/Sushi.mp4" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+            <!-- Overlay for readability -->
+            <div class="absolute inset-0 bg-black/40 z-10"></div>
+
+            <!-- 🖼️ ELEGANT FRAME -->
+            <div
+                class="absolute inset-0 z-20 pointer-events-none border-[10px] border-orange-500/40 shadow-[inset_0_0_30px_rgba(0,0,0,0.5)]">
+            </div>
+            <div class="absolute inset-6 z-20 pointer-events-none border-[1px] border-white/40 rounded-3xl"></div>
+
+            <!-- VIDEO CONTROLS -->
+            <div class="absolute bottom-8 right-8 z-50 flex flex-col gap-3">
+                <!-- Mute/Unmute -->
+                <button onclick="toggleMute()"
+                    class="w-12 h-12 rounded-full bg-white/90 backdrop-blur-sm flex items-center justify-center text-orange-600 hover:bg-orange-500 hover:text-white transition-all shadow-lg"
+                    title="เปิด/ปิดเสียง">
+                    <i id="mute-icon" class="fas fa-volume-mute"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Background Decorations (Fallback) -->
+        <div class="absolute top-20 left-10 text-8xl opacity-30 floating hidden lg:block z-0 pointer-events-none">🍣
+        </div>
+        <div
+            class="absolute bottom-24 right-16 text-7xl opacity-25 floating-delay hidden lg:block z-0 pointer-events-none">
+            �</div>
 
         <!-- Hero Content -->
-        <div class="relative z-10 max-w-5xl mx-auto">
-            <div class="inline-block bg-orange-100 text-orange-600 px-6 py-2 rounded-full font-display font-bold text-sm mb-6 animate-pulse-slow">
+        <div class="relative z-20 max-w-5xl mx-auto text-white">
+            <div
+                class="inline-block bg-orange-100/90 text-orange-600 px-6 py-2 rounded-full font-display font-bold text-sm mb-6 animate-pulse-slow backdrop-blur-sm">
                 ✨ PREMIUM JAPANESE RESTAURANT ✨
             </div>
-            
-            <h1 class="text-5xl md:text-7xl lg:text-8xl font-display font-extrabold mb-6 leading-tight">
-                <span class="text-orange-600">ซูชิละกัน</span><br>
-                <span class="text-orange-800">SUSHI PARADISE</span>
+
+            <!-- 🍣 STORE STATUS BANNER - JAPANESE STYLE -->
+            <div class="mb-8 flex justify-center">
+                <div class="relative">
+                    <!-- Subtle glow effect -->
+                    <div class="absolute inset-0 bg-red-300 rounded-2xl blur-lg opacity-20 animate-pulse-slow"></div>
+
+                    <!-- Main card - Japanese style -->
+                    <div class="relative rounded-2xl px-8 py-5 shadow-2xl border-3 backdrop-blur-xl" style="background: linear-gradient(135deg, #FFF9F0 0%, #FFEDD5 100%); 
+                                border: 3px solid #F97316;">
+                        <div class="flex flex-col md:flex-row items-center gap-5">
+                            <!-- Status Icon with circle background -->
+                            <div class="relative">
+                                <div class="w-16 h-16 rounded-full flex items-center justify-center" style="background: <?php echo $is_store_open ? 'linear-gradient(135deg, #86efac, #22c55e)' : 'linear-gradient(135deg, #fca5a5, #ef4444)'; ?>; 
+                                            box-shadow: 0 4px 15px rgba(0,0,0,0.15);">
+                                    <span class="text-3xl">
+                                        <?php echo $is_store_open ? '✓' : '✕'; ?>
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Status Text -->
+                            <div class="text-center md:text-left flex-1">
+                                <!-- Status -->
+                                <div class="text-2xl md:text-3xl font-display font-extrabold mb-2" style="color: <?php echo $is_store_open ? '#059669' : '#dc2626'; ?>; 
+                                            font-family: 'Prompt', sans-serif;">
+                                    <?php echo $store_status_text; ?>
+                                </div>
+
+                                <?php if ($manual_override == 'auto'): ?>
+                                    <!-- Opening Hours - แสดงเฉพาะโหมดอัตโนมัติ -->
+                                    <div
+                                        class="flex items-center justify-center md:justify-start gap-2 text-orange-800 text-lg md:text-xl font-semibold">
+                                        <i class="fas fa-clock text-orange-600"></i>
+                                        <span>
+                                            เปิด <?php echo $store_open_time; ?> - <?php echo $store_close_time; ?> น.
+                                        </span>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+
+                            <!-- Decorative sushi emoji -->
+                            <div class="hidden md:block text-4xl opacity-60">
+                                🍣
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                // Update current time in hero section
+                function updateHeroTime() {
+                    const now = new Date();
+                    const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const heroTimeEl = document.getElementById('hero-current-time');
+                    if (heroTimeEl) {
+                        heroTimeEl.textContent = timeStr;
+                    }
+                }
+                setInterval(updateHeroTime, 1000);
+                updateHeroTime();
+            </script>
+
+            <h1 class="text-5xl md:text-7xl lg:text-8xl font-display font-extrabold mb-6 leading-tight drop-shadow-lg">
+                <span class="text-white text-gradient-orange-on-dark">ซูชิละกัน</span><br>
+                <span class="text-white/90">SUSHI PARADISE</span>
             </h1>
-            
-            <p class="text-xl md:text-2xl text-orange-700/80 mb-10 max-w-2xl mx-auto leading-relaxed">
+
+            <p class="text-xl md:text-2xl text-white/90 mb-10 max-w-2xl mx-auto leading-relaxed drop-shadow-md">
                 🍣 ซูชิพรีเมียม วัตถุดิบสดใหม่ทุกวัน<br>
                 รสชาติต้นตำรับญี่ปุ่นแท้ๆ ในบรรยากาศอบอุ่น
             </p>
 
             <div class="flex flex-col sm:flex-row gap-5 justify-center items-center mb-12">
-                <a href="#menu" class="group btn-orange-gradient text-white text-xl font-display font-bold px-12 py-5 rounded-full hover:scale-105 transition-all flex items-center gap-3">
-                    <span>🔥 ดูเมนูยอดนิยม</span>
+                <a href="#menu"
+                    class="group btn-orange-gradient text-white text-xl font-display font-bold px-12 py-5 rounded-full hover:scale-105 transition-all flex items-center gap-3 shadow-orange-500/50 shadow-lg">
+                    <span>🔥 ดูเมนูซูชิ</span>
                     <i class="fas fa-arrow-right group-hover:translate-x-1 transition-transform"></i>
                 </a>
-                <a href="queue_reservation" class="glass-orange text-orange-600 border-2 border-orange-400 text-xl font-display font-bold px-10 py-5 rounded-full hover:bg-orange-50 hover:scale-105 transition-all flex items-center gap-3">
-                    <i class="fas fa-ticket-alt"></i>
-                    <span>จองคิวออนไลน์</span>
-                </a>
-            </div>
-
-            <!-- Queue Mini Board -->
-            <div class="card-orange p-8 max-w-lg mx-auto">
-                <h3 class="text-orange-600 font-display font-bold text-lg mb-5 flex items-center justify-center gap-3">
-                    <i class="fas fa-stopwatch text-orange-500 animate-pulse"></i> 
-                    <span>คิวที่รอเข้ารับบริการวันนี้</span>
-                </h3>
-                <div class="flex flex-wrap justify-center gap-3">
-                    <?php if (empty($queue_data)): ?>
-                        <div class="text-orange-400 py-3 flex items-center gap-2">
-                            <i class="fas fa-check-circle text-green-500"></i> ว่าง - ไม่มีคิวรอ
-                        </div>
-                    <?php else: ?>
-                        <?php foreach ($queue_data as $q): ?>
-                            <div class="bg-gradient-to-r from-orange-500 to-orange-600 text-white px-6 py-3 rounded-full font-display font-bold shadow-lg animate-pulse-slow">
-                                Q<?php echo str_pad($q['queue_number'], 2, '0', STR_PAD_LEFT); ?>
-                            </div>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </div>
-                <a href="queue_board" class="inline-block mt-5 text-sm text-orange-500 hover:text-orange-700 font-semibold transition-colors">
-                    ดูคิวทั้งหมด <i class="fas fa-chevron-right text-xs"></i>
-                </a>
-            </div>
-
-            <!-- Hours & Status -->
-            <div class="mt-10 flex flex-col items-center gap-4">
-                <!-- Store Status -->
-                <div class="inline-flex items-center gap-3 px-6 py-3 rounded-full <?php echo $is_store_open ? 'bg-green-500' : 'bg-red-500'; ?> shadow-lg animate-pulse-slow">
-                    <span class="text-2xl"><?php echo $store_status_icon; ?></span>
-                    <span class="text-white font-display font-bold text-lg"><?php echo $store_status_text; ?></span>
-                </div>
-                
-                <!-- Store Hours (only show when not manually closed) -->
-                <?php if ($show_hours): ?>
-                <div class="inline-flex items-center gap-3 bg-white/80 backdrop-blur-sm px-8 py-4 rounded-full border border-orange-200 shadow-sm">
-                    <i class="fas fa-clock text-orange-500 text-xl"></i>
-                    <span class="text-orange-800 font-display font-semibold">เปิดทุกวัน: <span class="text-orange-600 font-bold"><?php echo htmlspecialchars($store_open_time); ?> - <?php echo htmlspecialchars($store_close_time); ?> น.</span></span>
-                </div>
-                <?php endif; ?>
-            </div>
-        </div>
-    </section>
-
-    <!-- 🎬 VIDEO SHOWCASE SECTION -->
-    <section class="relative py-20 overflow-hidden">
-        <div class="container mx-auto px-6">
-            <div class="text-center mb-12">
-                <div class="inline-block bg-orange-100 text-orange-600 px-4 py-1 rounded-full text-sm font-bold mb-3 animate-pulse-slow">
-                    🎬 VIDEO SHOWCASE
-                </div>
-                <h2 class="text-4xl md:text-5xl font-display font-extrabold text-orange-800 mb-4">
-                    ชมบรรยากาศซูชิสุดพรีเมียม
-                </h2>
-                <div class="w-32 h-1.5 bg-gradient-to-r from-orange-400 to-orange-600 mx-auto rounded-full"></div>
-            </div>
-
-            <div class="max-w-5xl mx-auto">
-                <div class="relative rounded-3xl overflow-hidden shadow-2xl border-4 border-orange-200 group">
-                    <!-- Video -->
-                    <video 
-                        id="sushiVideo"
-                        class="w-full h-auto object-cover"
-                        autoplay 
-                        loop 
-                        muted 
-                        playsinline
-                        poster="video/Sushi.mp4"
-                    >
-                        <source src="video/Sushi.mp4" type="video/mp4">
-                        เบราว์เซอร์ของคุณไม่รองรับการเล่นวิดีโอ
-                    </video>
-                    
-                    <!-- Overlay Gradient -->
-                    <div class="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                    
-                    <!-- Floating Badge -->
-                    <div class="absolute top-6 right-6 bg-gradient-to-r from-orange-500 to-orange-600 text-white px-6 py-3 rounded-full font-display font-bold shadow-lg backdrop-blur-sm flex items-center gap-2">
-                        <i class="fas fa-play-circle animate-pulse"></i>
-                        <span>AUTO PLAY</span>
-                    </div>
-
-                    <!-- Mute/Unmute Button -->
-                    <button 
-                        id="muteBtn"
-                        onclick="toggleMute()"
-                        class="absolute bottom-6 right-6 w-14 h-14 bg-white/90 backdrop-blur-sm text-orange-600 rounded-full shadow-lg hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center group/btn hover:scale-110"
-                        title="เปิด/ปิดเสียง"
-                    >
-                        <i id="muteIcon" class="fas fa-volume-mute text-xl"></i>
-                    </button>
-                </div>
-
-                <!-- Caption -->
-                <div class="mt-8 text-center glass-orange rounded-2xl p-6 max-w-2xl mx-auto">
-                    <p class="text-orange-700 font-display text-lg leading-relaxed">
-                        <i class="fas fa-quote-left text-orange-400 mr-2"></i>
-                        <span class="font-semibold">เห็นแล้วหิว! </span>
-                        ชมวิดีโอซูชิสดใหม่ทำสดใหม่ทุกวัน จากมือเชฟมืออาชีพ 
-                        <i class="fas fa-quote-right text-orange-400 ml-2"></i>
-                    </p>
-                </div>
             </div>
         </div>
 
-        <!-- Decorative Elements -->
-        <div class="absolute -bottom-10 -left-10 w-40 h-40 bg-orange-200 rounded-full blur-3xl opacity-30"></div>
-        <div class="absolute -top-10 -right-10 w-40 h-40 bg-orange-300 rounded-full blur-3xl opacity-30"></div>
+        <script>
+            const video = document.getElementById('hero-video');
+            const muteIcon = document.getElementById('mute-icon');
+
+            // Ensure autoplay works
+            window.addEventListener('load', () => {
+                video.play().catch(error => {
+                    console.log("Autoplay prevented:", error);
+                });
+            });
+
+            function toggleMute() {
+                video.muted = !video.muted;
+                if (video.muted) {
+                    muteIcon.className = 'fas fa-volume-mute';
+                } else {
+                    muteIcon.className = 'fas fa-volume-up';
+                }
+            }
+        </script>
     </section>
 
-    <!-- 🔥 PROMOTIONS SECTION -->
-    <section id="promotions" class="py-20 container mx-auto px-6">
-        <div class="text-center mb-16">
-            <div class="inline-block bg-red-100 text-red-500 px-4 py-1 rounded-full text-sm font-bold mb-3">
-                🔥 HOT DEALS
-            </div>
-            <h2 class="text-4xl md:text-5xl font-display font-extrabold text-gradient-orange mb-4">โปรโมชั่นสุดพิเศษ</h2>
-            <div class="w-32 h-1.5 bg-gradient-to-r from-orange-400 to-orange-600 mx-auto rounded-full"></div>
-        </div>
-
-        <?php if (count($promotions) > 0): ?>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                <?php foreach ($promotions as $promo): ?>
-                    <div class="card-orange group overflow-hidden">
-                        <!-- Hot Badge -->
-                        <div class="absolute top-4 right-4 z-10 badge-hot text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg">
-                            🔥 HOT
-                        </div>
-                        
-                        <!-- Image -->
-                        <div class="relative h-56 overflow-hidden">
-                            <?php if (!empty($promo['image_path'])): ?>
-                                <img src="<?php echo htmlspecialchars($promo['image_path']); ?>" alt="Promo" 
-                                    class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
-                            <?php else: ?>
-                                <div class="w-full h-full bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center">
-                                    <i class="fas fa-gift text-6xl text-orange-300"></i>
-                                </div>
-                            <?php endif; ?>
-                            <div class="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent"></div>
-                        </div>
-
-                        <!-- Content -->
-                        <div class="p-6">
-                            <h3 class="text-xl font-display font-bold text-orange-700 mb-3 group-hover:text-orange-500 transition-colors">
-                                <?php echo htmlspecialchars($promo['title']); ?>
-                            </h3>
-                            <p class="text-orange-600/70 leading-relaxed mb-5 text-sm line-clamp-2">
-                                <?php echo nl2br(htmlspecialchars($promo['description'])); ?>
-                            </p>
-                            <button class="w-full bg-orange-100 text-orange-600 font-display font-bold py-3 rounded-xl hover:bg-orange-500 hover:text-white transition-all">
-                                <i class="fas fa-hand-pointer mr-2"></i> รับสิทธิ์เลย
-                            </button>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        <?php else: ?>
-            <div class="text-center py-16 card-orange">
-                <i class="fas fa-tags text-6xl text-orange-200 mb-6"></i>
-                <p class="text-xl text-orange-400 font-display">เร็วๆ นี้! ติดตามโปรโมชั่นใหม่ได้ที่นี่</p>
-            </div>
-        <?php endif; ?>
-    </section>
 
     <!-- 🍱 MENU SECTION -->
     <section id="menu" class="relative py-24 bg-gradient-to-b from-transparent via-orange-50/50 to-transparent">
@@ -647,19 +603,22 @@ Z
                 </div>
                 <h2 class="text-4xl md:text-5xl font-display font-extrabold text-orange-800 mb-4">เมนูแนะนำยอดนิยม</h2>
                 <div class="w-32 h-1.5 bg-gradient-to-r from-orange-400 to-orange-600 mx-auto rounded-full mb-10"></div>
-                
+
                 <!-- Search Box -->
                 <form action="#menu" method="GET" class="max-w-md mx-auto relative">
-                    <input type="text" name="search" placeholder="🔍 ค้นหาเมนูที่ต้องการ..." value="<?php echo htmlspecialchars($search_term); ?>"
+                    <input type="text" name="search" placeholder="🔍 ค้นหาเมนูที่ต้องการ..."
+                        value="<?php echo htmlspecialchars($search_term); ?>"
                         class="w-full pl-6 pr-14 py-4 rounded-2xl bg-white border-2 border-orange-200 text-orange-800 placeholder-orange-300 font-display focus:border-orange-500 focus:ring-4 focus:ring-orange-200 outline-none transition-all shadow-sm">
-                    <button type="submit" class="absolute right-3 top-1/2 -translate-y-1/2 bg-orange-500 text-white w-10 h-10 rounded-xl hover:bg-orange-600 transition-colors">
+                    <button type="submit"
+                        class="absolute right-3 top-1/2 -translate-y-1/2 bg-orange-500 text-white w-10 h-10 rounded-xl hover:bg-orange-600 transition-colors">
                         <i class="fas fa-search"></i>
                     </button>
                 </form>
             </div>
 
             <?php if (isset($_SESSION['upload_status']) && $_SESSION['upload_status'] == 'success'): ?>
-                <div class="max-w-2xl mx-auto mb-10 bg-green-50 border-l-4 border-green-500 text-green-700 p-5 rounded-xl flex items-center gap-4 shadow-sm">
+                <div
+                    class="max-w-2xl mx-auto mb-10 bg-green-50 border-l-4 border-green-500 text-green-700 p-5 rounded-xl flex items-center gap-4 shadow-sm">
                     <i class="fas fa-check-circle text-3xl text-green-500"></i>
                     <div>
                         <p class="font-bold">✅ บันทึกสินค้าใหม่เรียบร้อยแล้ว!</p>
@@ -672,7 +631,7 @@ Z
             <div class="max-w-6xl mx-auto space-y-6">
                 <?php
                 if ($conn && $connection_error === null) {
-                    $sql = "SELECT id, name, price, description, image_path FROM products";
+                    $sql = "SELECT id, name, price, description, image_path, stock_quantity FROM products";
                     if (!empty($search_term)) {
                         $sql .= " WHERE name LIKE ? OR description LIKE ?";
                     }
@@ -707,54 +666,82 @@ Z
                             $category_count++;
                             $category_id = "collapse" . $category_count;
                             $isOpen = $category_count == 1;
-                            
+
                             $icon = '✨';
-                            if (strpos($category, 'ซาชิมิ') !== false) $icon = '🍣';
-                            elseif (strpos($category, 'มากิ') !== false || strpos($category, 'โรล') !== false) $icon = '🍱';
-                            elseif (strpos($category, 'ทอด') !== false || strpos($category, 'ร้อน') !== false) $icon = '🍤';
-                            elseif (strpos($category, 'เครื่องดื่ม') !== false || strpos($category, 'ของหวาน') !== false) $icon = '🍵';
+                            if (strpos($category, 'ซาชิมิ') !== false)
+                                $icon = '🍣';
+                            elseif (strpos($category, 'มากิ') !== false || strpos($category, 'โรล') !== false)
+                                $icon = '🍱';
+                            elseif (strpos($category, 'ทอด') !== false || strpos($category, 'ร้อน') !== false)
+                                $icon = '🍤';
+                            elseif (strpos($category, 'เครื่องดื่ม') !== false || strpos($category, 'ของหวาน') !== false)
+                                $icon = '🍵';
                             ?>
                             <div class="accordion-item">
-                                <button class="accordion-btn <?php echo $isOpen ? 'active' : ''; ?>" onclick="toggleAccordion('<?php echo $category_id; ?>', this)">
+                                <button class="accordion-btn <?php echo $isOpen ? 'active' : ''; ?>"
+                                    onclick="toggleAccordion('<?php echo $category_id; ?>', this)">
                                     <span class="flex items-center gap-4">
                                         <span class="text-3xl"><?php echo $icon; ?></span>
                                         <span><?php echo $category; ?></span>
                                     </span>
-                                    <i class="fas fa-chevron-down transition-transform duration-300 <?php echo $isOpen ? 'rotate-180' : ''; ?>"></i>
+                                    <i
+                                        class="fas fa-chevron-down transition-transform duration-300 <?php echo $isOpen ? 'rotate-180' : ''; ?>"></i>
                                 </button>
-                                
-                                <div id="<?php echo $category_id; ?>" class="accordion-content <?php echo $isOpen ? 'show' : ''; ?>">
+
+                                <div id="<?php echo $category_id; ?>"
+                                    class="accordion-content <?php echo $isOpen ? 'show' : ''; ?>">
                                     <div class="category-grid">
                                         <?php foreach ($grouped_products[$category] as $row): ?>
-                                            <div class="card-orange group cursor-pointer overflow-hidden" 
-                                                onclick="openModal('<?php echo htmlspecialchars($row['image_path']); ?>', '<?php echo htmlspecialchars($row['name']); ?>', '<?php echo htmlspecialchars(addslashes($row['description'])); ?>', '<?php echo number_format($row['price']); ?>')">
-                                                
+                                            <div class="card-orange group cursor-pointer overflow-hidden"
+                                                onclick="openModal('<?php echo htmlspecialchars($row['image_path']); ?>', '<?php echo htmlspecialchars($row['name']); ?>', '<?php echo htmlspecialchars(addslashes($row['description'])); ?>', '<?php echo number_format($row['price']); ?>', '<?php echo $row['stock_quantity']; ?>')">
+
                                                 <div class="relative h-52 overflow-hidden">
                                                     <?php if (!empty($row['image_path'])): ?>
-                                                        <img src="<?php echo htmlspecialchars($row['image_path']); ?>" 
-                                                            alt="<?php echo htmlspecialchars($row['name']); ?>" 
+                                                        <img src="<?php echo htmlspecialchars($row['image_path']); ?>"
+                                                            alt="<?php echo htmlspecialchars($row['name']); ?>"
                                                             class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
                                                     <?php else: ?>
-                                                        <div class="w-full h-full bg-gradient-to-br from-orange-50 to-orange-100 flex items-center justify-center">
+                                                        <div
+                                                            class="w-full h-full bg-gradient-to-br from-orange-50 to-orange-100 flex items-center justify-center">
                                                             <i class="fas fa-utensils text-5xl text-orange-200"></i>
                                                         </div>
                                                     <?php endif; ?>
-                                                    
+
                                                     <!-- Price Badge -->
-                                                    <div class="absolute top-4 right-4 bg-gradient-to-r from-orange-500 to-orange-600 text-white font-display font-bold px-4 py-2 rounded-full shadow-lg">
+                                                    <div
+                                                        class="absolute top-4 right-4 bg-gradient-to-r from-orange-500 to-orange-600 text-white font-display font-bold px-4 py-2 rounded-full shadow-lg">
                                                         <?php echo number_format($row['price']); ?>฿
                                                     </div>
                                                 </div>
 
                                                 <div class="p-5">
-                                                    <h4 class="font-display font-bold text-lg text-orange-800 mb-2 group-hover:text-orange-500 transition-colors">
+                                                    <h4
+                                                        class="font-display font-bold text-lg text-orange-800 mb-2 group-hover:text-orange-500 transition-colors">
                                                         <?php echo htmlspecialchars($row['name']); ?>
                                                     </h4>
-                                                    <p class="text-sm text-orange-600/60 line-clamp-2 mb-4">
-                                                        <?php echo htmlspecialchars($row['description']); ?>
-                                                    </p>
-                                                    <button class="w-full bg-orange-100 text-orange-600 font-display font-bold py-3 rounded-xl group-hover:bg-orange-500 group-hover:text-white transition-all">
-                                                        <i class="fas fa-cart-plus mr-2"></i> สั่งเลย
+                                                    <div class="flex justify-between items-center mb-4">
+                                                        <p class="text-sm text-orange-600/60 line-clamp-2">
+                                                            <?php echo htmlspecialchars($row['description']); ?>
+                                                        </p>
+                                                    </div>
+
+                                                    <!-- Stock Display -->
+                                                    <div class="mb-3 flex items-center gap-2 text-sm font-bold">
+                                                        <?php if ($row['stock_quantity'] > 0): ?>
+                                                            <span class="text-green-600 bg-green-100 px-3 py-1 rounded-full">
+                                                                <i class="fas fa-box-open mr-1"></i>
+                                                                <?php echo number_format($row['stock_quantity']); ?> ชิ้น
+                                                            </span>
+                                                        <?php else: ?>
+                                                            <span class="text-red-600 bg-red-100 px-3 py-1 rounded-full">
+                                                                <i class="fas fa-times-circle mr-1"></i> สินค้าหมด
+                                                            </span>
+                                                        <?php endif; ?>
+                                                    </div>
+
+                                                    <button
+                                                        class="w-full bg-orange-100 text-orange-600 font-display font-bold py-3 rounded-xl group-hover:bg-orange-500 group-hover:text-white transition-all">
+                                                        <i class="fas fa-list mr-2"></i> รายละเอียด
                                                     </button>
                                                 </div>
                                             </div>
@@ -774,213 +761,71 @@ Z
         </div>
     </section>
 
-    <!-- 🗺️ CONTACT / MAP -->
-    <section id="contact" class="py-16 text-center container mx-auto px-6">
-        <div class="mb-10">
-            <div class="inline-block bg-orange-100 text-orange-600 px-4 py-1 rounded-full text-sm font-bold mb-3">📍 FIND US</div>
-            <h2 class="text-3xl md:text-4xl font-display font-extrabold text-orange-800 mb-2">ที่ตั้งและเส้นทางมาร้าน</h2>
-            <p class="text-orange-600">เดินทางมาหาเราได้ง่ายๆ ด้วยระบบนำทางด้านล่าง</p>
-        </div>
 
-        <button onclick="toggleRouteMap()" id="btn-toggle-map"
-            class="bg-white border-2 border-orange-400 text-orange-600 px-10 py-4 rounded-full font-display font-bold hover:bg-orange-50 hover:scale-105 transition-all inline-flex items-center gap-3 shadow-lg mb-8">
-            <i class="fas fa-location-arrow text-xl" id="toggle-icon"></i> <span id="toggle-text">ดูเส้นทางจากตำแหน่งของคุณ</span>
-        </button>
-
-        <div id="map-section" class="max-w-5xl mx-auto rounded-3xl overflow-hidden shadow-2xl border-4 border-orange-200 relative hidden mb-8">
-            <div id="map"></div>
-            <div id="loading-map" class="absolute inset-0 bg-white/80 z-20 flex flex-col items-center justify-center">
-                <div class="w-12 h-12 border-4 border-orange-500 border-t-transparent animate-spin rounded-full mb-4"></div>
-                <p class="font-display font-bold text-orange-600">กำลังคำนวณเส้นทางจากตำแหน่งของคุณ...</p>
-            </div>
-        </div>
-
-        <div class="mt-8 glass-orange p-6 rounded-2xl max-w-2xl mx-auto flex items-center justify-center gap-4 border border-orange-200 shadow-sm">
-            <div class="w-12 h-12 bg-orange-500 text-white rounded-xl flex items-center justify-center text-xl">
-                <i class="fas fa-map-marker-alt"></i>
-            </div>
-            <div class="text-left">
-                <p class="text-sm text-orange-500 font-bold uppercase tracking-wider">ที่อยู่ร้าน</p>
-                <p class="text-orange-800 font-display font-semibold"><?php echo htmlspecialchars($store_address); ?></p>
-            </div>
-        </div>
-    </section>
 
     <!-- 🍊 FOOTER -->
     <footer class="bg-gradient-to-r from-orange-500 to-orange-600 py-16 mt-auto">
         <div class="container mx-auto px-6 text-center text-white">
             <div class="text-6xl mb-6">🍣</div>
             <h2 class="text-3xl font-display font-bold mb-4">ซูชิละกัน PARADISE</h2>
-            <p class="text-white/80 mb-8 max-w-md mx-auto">Premium Japanese Restaurant<br>อร่อย สด สะอาด ต้องที่ซูชิละกัน 🍣</p>
-            
+            <p class="text-white/80 mb-8 max-w-md mx-auto">Premium Japanese Restaurant<br>อร่อย สด สะอาด
+                ต้องที่ซูชิละกัน 🍣</p>
+
             <div class="flex justify-center gap-5 mb-10">
-                <a href="https://www.facebook.com/share/1Bod121vTg/" class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i class="fab fa-facebook-f"></i></a>
-                <a href="line-oa" class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i class="fab fa-line"></i></a>
+                <a href="https://www.facebook.com/share/1Bod121vTg/"
+                    class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i
+                        class="fab fa-facebook-f"></i></a>
+                <a href="line-oa"
+                    class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl"><i
+                        class="fab fa-line"></i></a>
+                <a href="https://script.google.com/macros/s/AKfycbxm-bY7nKXI5Hzy76QZ_zOc0dlv_a140AML8piJiBpj_dGcBNuXQP4iLaJCuM6TWR13/exec"
+                    class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center hover:bg-white hover:text-orange-500 transition-all text-xl">
+                    <i class="fa-solid fa-comments"></i></a>
             </div>
 
+
+
             <p class="text-white/60 text-sm">© 2026 ซูชิละกัน Paradise. All Rights Reserved.</p>
-            <a href="formmenu" class="inline-block mt-4 text-white/40 hover:text-white text-sm transition-colors">
+            <a href="admin_login" class="inline-block mt-4 text-white/20 hover:text-white/40 text-xs transition-colors">
                 <i class="fas fa-lock"></i>
             </a>
         </div>
     </footer>
 
+
     <!-- 🛒 PRODUCT MODAL -->
-    <div id="productModal" class="fixed inset-0 z-[99999] hidden flex justify-center items-center bg-black/60 backdrop-blur-md p-6">
-        <div class="bg-white rounded-3xl p-8 max-w-lg w-full relative shadow-2xl transform scale-100 transition-all border-2 border-orange-100">
-            <button onclick="closeModal()" class="absolute top-4 right-4 w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-500 hover:bg-orange-500 hover:text-white transition-all text-xl font-bold">
+    <div id="productModal"
+        class="fixed inset-0 z-[99999] hidden flex justify-center items-center bg-black/60 backdrop-blur-md p-6">
+        <div
+            class="bg-white rounded-3xl p-8 max-w-lg w-full relative shadow-2xl transform scale-100 transition-all border-2 border-orange-100">
+            <button onclick="closeModal()"
+                class="absolute top-4 right-4 w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-500 hover:bg-orange-500 hover:text-white transition-all text-xl font-bold">
                 &times;
             </button>
-            
+
             <div class="flex flex-col items-center text-center">
-                <div class="w-full h-64 bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl mb-6 flex items-center justify-center overflow-hidden">
+                <div
+                    class="w-full h-64 bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl mb-6 flex items-center justify-center overflow-hidden">
                     <img id="modalImg" src="" alt="" class="max-w-full max-h-full object-contain drop-shadow-lg">
                 </div>
-                
+
                 <h3 id="modalName" class="text-2xl font-display font-bold text-orange-700 mb-3"></h3>
-                <p id="modalDesc" class="text-orange-600/60 mb-6 leading-relaxed"></p>
+                <p id="modalDesc" class="text-orange-600/60 mb-4 leading-relaxed"></p>
+
+                <div id="modalStock" class="mb-6 font-bold text-lg"></div>
+
                 <div id="modalPrice" class="text-4xl font-display font-extrabold text-gradient-orange mb-6"></div>
-                
-                <button onclick="window.location.href='queue_reservation'"
+
+                <button onclick="closeModal()"
                     class="w-full btn-orange-gradient text-white font-display font-bold text-xl py-4 rounded-2xl hover:scale-[1.02] transition-transform">
-                    🛒 สั่งเลยตอนนี้
+                    ปิดหน้าต่าง
                 </button>
             </div>
         </div>
     </div>
 
-    <!-- Leaflet & Routing JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-
     <script>
-        let map;
-        let routingControl;
-        const storeLat = <?php echo $store_lat; ?>;
-        const storeLng = <?php echo $store_lng; ?>;
 
-        function toggleRouteMap() {
-            const mapSection = document.getElementById('map-section');
-            const toggleText = document.getElementById('toggle-text');
-            const toggleIcon = document.getElementById('toggle-icon');
-            
-            if (mapSection.classList.contains('hidden')) {
-                // Open Map
-                mapSection.classList.remove('hidden');
-                toggleText.innerText = "ปิดแผนที่นำทาง";
-                toggleIcon.classList.remove('fa-location-arrow');
-                toggleIcon.classList.add('fa-times-circle');
-                
-                if (!map) {
-                    initRouteMap();
-                } else {
-                    // Refresh map size if it was initialized while hidden
-                    setTimeout(() => map.invalidateSize(), 100);
-                }
-            } else {
-                // Close Map
-                mapSection.classList.add('hidden');
-                toggleText.innerText = "ดูเส้นทางจากตำแหน่งของคุณ";
-                toggleIcon.classList.remove('fa-times-circle');
-                toggleIcon.classList.add('fa-location-arrow');
-            }
-        }
-
-        function initRouteMap() {
-            const mapSection = document.getElementById('map-section');
-            const loading = document.getElementById('loading-map');
-            
-            loading.classList.remove('hidden');
-            
-            if (!map) {
-                map = L.map('map').setView([storeLat, storeLng], 15);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap'
-                }).addTo(map);
-
-                // Fix Leaflet Default Icon path
-                delete L.Icon.Default.prototype._getIconUrl;
-                L.Icon.Default.mergeOptions({
-                    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-                    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-                    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-                });
-
-                // Show Store Marker Immediately
-                L.marker([storeLat, storeLng]).addTo(map)
-                    .bindPopup('🍣 <b>ร้านซูชิละกัน</b><br><?php echo addslashes($store_address); ?>')
-                    .openPopup();
-            }
-
-            // Get User Location
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        const userLat = position.coords.latitude;
-                        const userLng = position.coords.longitude;
-                        
-                        loading.classList.add('hidden');
-
-                        if (routingControl) {
-                            map.removeControl(routingControl);
-                        }
-
-                        routingControl = L.Routing.control({
-                            waypoints: [
-                                L.latLng(userLat, userLng),
-                                L.latLng(storeLat, storeLng)
-                            ],
-                            routeWhileDragging: true,
-                            language: 'th',
-                            lineOptions: {
-                                styles: [{ color: '#F97316', weight: 6, opacity: 0.8 }]
-                            },
-                            createMarker: function(i, wp, nWps) {
-                                if (i === 0) {
-                                    return L.marker(wp.latLng).bindPopup('📍 <b>คุณอยู่ที่นี่</b>');
-                                }
-                                return null;
-                            }
-                        }).addTo(map);
-                        
-                        map.scrollIntoView({ behavior: 'smooth' });
-                    },
-                    (error) => {
-                        console.error('Geolocation error:', error);
-                        loading.classList.add('hidden');
-                        alert("ไม่สามารถเข้าถึงตำแหน่งของคุณได้ กรุณาตรวจสอบการอนุญาตระบุตำแหน่งในเบราว์เซอร์");
-                    }
-                );
-            } else {
-                loading.classList.add('hidden');
-                alert("เบราว์เซอร์ของคุณไม่รองรับการแสดงพิกัดตำแหน่ง");
-            }
-        }
-
-        // Auto-initialize map on load is removed - back to manual button
-
-        // Toggle Mute/Unmute for Video
-        function toggleMute() {
-            const video = document.getElementById('sushiVideo');
-            const icon = document.getElementById('muteIcon');
-            const btn = document.getElementById('muteBtn');
-            
-            if (video.muted) {
-                video.muted = false;
-                icon.classList.remove('fa-volume-mute');
-                icon.classList.add('fa-volume-up');
-                btn.classList.add('ring-4', 'ring-green-400/50');
-                setTimeout(() => btn.classList.remove('ring-4', 'ring-green-400/50'), 500);
-            } else {
-                video.muted = true;
-                icon.classList.remove('fa-volume-up');
-                icon.classList.add('fa-volume-mute');
-                btn.classList.add('ring-4', 'ring-red-400/50');
-                setTimeout(() => btn.classList.remove('ring-4', 'ring-red-400/50'), 500);
-            }
-        }
-
-        // Loader
         window.addEventListener('load', () => {
             const loader = document.getElementById('page-loader');
             setTimeout(() => {
@@ -1018,11 +863,19 @@ Z
         }
 
         // Modal
-        function openModal(img, name, desc, price) {
+        function openModal(img, name, desc, price, stock) {
             document.getElementById('modalImg').src = img || '';
             document.getElementById('modalName').textContent = name;
             document.getElementById('modalDesc').textContent = desc || 'ไม่มีคำอธิบาย';
             document.getElementById('modalPrice').textContent = price + '.-';
+
+            const stockEl = document.getElementById('modalStock');
+            if (stock > 0) {
+                stockEl.innerHTML = `<span class="text-green-600 bg-green-100 px-4 py-2 rounded-full"><i class="fas fa-box-open mr-2"></i> ${stock} ชิ้น</span>`;
+            } else {
+                stockEl.innerHTML = `<span class="text-red-600 bg-red-100 px-4 py-2 rounded-full"><i class="fas fa-times-circle mr-2"></i> สินค้าหมด</span>`;
+            }
+
             document.getElementById('productModal').classList.remove('hidden');
         }
 
@@ -1030,11 +883,16 @@ Z
             document.getElementById('productModal').classList.add('hidden');
         }
 
-        document.getElementById('productModal').addEventListener('click', function(e) {
+        document.getElementById('productModal').addEventListener('click', function (e) {
             if (e.target === this) closeModal();
         });
     </script>
+
+    <!-- Three.js - Load at end for better performance -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/three_bg.js"></script>
 </body>
+
 </html>
 <?php
 if ($conn !== null) {

@@ -221,11 +221,12 @@ if ($isLoggedIn) {
         <h2>เข้าสู่ระบบผู้ดูแล</h2>
         <p class="subtitle">Admin Control Panel</p>
 
-        <?php if (isset($loginError)): ?>
+        <?php if (isset($_SESSION['login_error'])): ?>
             <div class="error-message">
                 <i class="fas fa-exclamation-circle"></i>
-                <?php echo $loginError; ?>
+                <?php echo htmlspecialchars($_SESSION['login_error']); ?>
             </div>
+            <?php unset($_SESSION['login_error']); ?>
         <?php endif; ?>
 
         <form method="POST" action="">
@@ -246,7 +247,7 @@ if ($isLoggedIn) {
             </button>
         </form>
 
-        <a href="index" class="home-link">
+        <a href="/" class="home-link">
             <i class="fas fa-home"></i> กลับหน้าหลัก
         </a>
     </div>

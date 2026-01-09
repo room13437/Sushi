@@ -4,134 +4,190 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Line Official Account | ซูชิละกัน 🍣</title>
+    <!-- Favicon -->
     <link rel="icon" type="image/png" href="icon/icons.png?v=4">
-    <title>🍣 Line Official | ซูชิละกัน</title>
-
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        'display': ['Prompt', 'sans-serif'],
-                        'body': ['Sarabun', 'sans-serif'],
-                    },
-                    animation: {
-                        'float': 'float 4s ease-in-out infinite',
-                    },
-                    keyframes: {
-                        float: {
-                            '0%, 100%': { transform: 'translateY(0)' },
-                            '50%': { transform: 'translateY(-15px)' },
-                        },
-                    }
-                }
-            }
-        }
-    </script>
-
     <!-- Fonts -->
     <link
-        href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=Prompt:wght@400;600;700;800&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=Prompt:wght@400;600;700&display=swap"
         rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-
-    <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="js/three_bg.js"></script>
+    <!-- CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
-        ::-webkit-scrollbar {
-            width: 10px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: #FFF8F0;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: linear-gradient(180deg, #F97316, #EA580C);
-            border-radius: 10px;
+        :root {
+            --primary-orange: #ff6f00;
+            --secondary-red: #d32f2f;
         }
 
         body {
             font-family: 'Sarabun', sans-serif;
-            background: linear-gradient(180deg, #FFF9F0 0%, #FFEDD5 50%, #FED7AA 100%);
-            background-attachment: fixed;
-            color: #7C2D12;
-            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            background: #fff;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        .card-orange {
+        /* Glassmorphism Card Style */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 40px;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 25px 45px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            width: 90%;
+            max-width: 420px;
+            text-align: center;
+            z-index: 10;
+            position: relative;
+            animation: cardEntrance 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes cardEntrance {
+            from {
+                opacity: 0;
+                transform: scale(0.8) translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .qr-frame {
             background: white;
-            border-radius: 24px;
-            box-shadow: 0 10px 40px rgba(249, 115, 22, 0.1);
-            border: 1px solid rgba(249, 115, 22, 0.1);
+            padding: 15px;
+            border-radius: 30px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+            display: inline-block;
+            transition: transform 0.3s ease;
         }
 
-        .text-gradient-orange {
-            background: linear-gradient(135deg, #F97316, #EA580C, #C2410C);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+        .qr-frame:hover {
+            transform: scale(1.05);
         }
 
-        .floating {
-            animation: float 4s ease-in-out infinite;
+        .qr-image {
+            width: 250px;
+            height: 250px;
+            object-fit: contain;
+            border-radius: 15px;
+        }
+
+        .btn-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 25px;
+            background: white;
+            color: #666;
+            border-radius: 15px;
+            text-decoration: none;
+            font-family: 'Prompt', sans-serif;
+            font-weight: 600;
+            transition: all 0.3s;
+            margin-top: 20px;
+            border: 1px solid #eee;
+        }
+
+        .btn-back:hover {
+            background: var(--primary-orange);
+            color: white;
+            border-color: var(--primary-orange);
+            transform: translateY(-2px);
+        }
+
+        .floating-emoji {
+            position: fixed;
+            font-size: 2.5rem;
+            z-index: 1;
+            opacity: 0.6;
+            pointer-events: none;
+            animation: floatEmoji 8s ease-in-out infinite;
+        }
+
+        @keyframes floatEmoji {
+
+            0%,
+            100% {
+                transform: translateY(0) rotate(0deg);
+            }
+
+            50% {
+                transform: translateY(-40px) rotate(20deg);
+            }
+        }
+
+        /* Three.js Background Container */
+        #three-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
         }
     </style>
 </head>
 
-<body class="antialiased flex items-center justify-center p-6 relative overflow-hidden">
+<body>
 
-    <!-- Background Decorations -->
-    <div class="absolute top-20 left-10 text-8xl opacity-20 floating hidden lg:block">🍣</div>
-    <div class="absolute bottom-24 right-16 text-7xl opacity-15 floating hidden lg:block"
-        style="animation-delay: 1.5s;">🍱</div>
+    <!-- Three.js Background -->
+    <div id="three-bg"></div>
 
-    <div class="max-w-md w-full relative z-10">
-        <!-- Logo/Header -->
-        <div class="text-center mb-8">
-            <a href="/"
-                class="inline-flex items-center justify-center w-20 h-20 bg-white rounded-3xl shadow-lg mb-4 transform hover:scale-110 transition-all duration-300 cursor-pointer group">
-                <span class="text-4xl group-hover:animate-bounce">🍣</span>
-            </a>
-            <h1 class="text-3xl font-display font-extrabold text-gradient-orange mb-1">ซูชิละกัน</h1>
-            <p class="text-orange-600 font-display font-semibold">SUSHI PARADISE</p>
+    <!-- Floating Emojis -->
+    <div class="floating-emoji" style="top: 15%; left: 10%;">🍣</div>
+    <div class="floating-emoji" style="bottom: 20%; right: 12%; animation-delay: -2s;">🍱</div>
+    <div class="floating-emoji" style="top: 25%; right: 15%; animation-delay: -4s;">🍤</div>
+    <div class="floating-emoji" style="bottom: 15%; left: 15%; animation-delay: -6s;">🍱</div>
+
+    <!-- Content Card -->
+    <div class="glass-card">
+        <div class="mb-6">
+            <h1
+                class="text-3xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent mb-2 font-display">
+                LINE Official Account
+            </h1>
+            <p class="text-gray-500 font-semibold">ซูชิละกัน Paradise</p>
         </div>
 
-        <!-- Main Card -->
-        <div class="card-orange p-8 text-center">
-            <!-- Line Badge -->
-            <div
-                class="mb-6 inline-flex items-center gap-2 bg-[#06C755] text-white px-6 py-2 rounded-full font-display font-bold text-sm shadow-lg">
-                <i class="fab fa-line text-lg"></i>
-                <span>LINE OFFICIAL</span>
-            </div>
-
-            <!-- QR Code -->
-            <div class="mb-6">
-                <img src="LINEOA/LINEOA.jpg" alt="Line QR Code"
-                    class="w-full h-auto rounded-2xl shadow-lg mx-auto max-w-[280px]">
-            </div>
-
-            <p class="text-orange-600 mb-6">สแกนเพื่อเพิ่มเพื่อน</p>
-
-            <!-- Back Button -->
-            <a href="/"
-                class="inline-flex items-center gap-2 text-orange-500 hover:text-orange-600 font-display font-semibold transition-colors group">
-                <i class="fas fa-arrow-left group-hover:-translate-x-1 transition-transform"></i>
-                กลับหน้าหลัก
-            </a>
+        <div class="qr-frame">
+            <!-- QR Code from LINEOA Folder -->
+            <img src="LINEOA/LINEOA.jpg" alt="LINE QR Code" class="qr-image">
         </div>
 
-        <!-- Footer -->
-        <p class="text-center mt-6 text-orange-400 text-sm">
-            © 2026 ซูชิละกัน Paradise
-        </p>
+        <div class="text-gray-600 mb-6 font-semibold">
+            <p>สแกนเพื่อรับโปรโมชั่นใหม่ๆ</p>
+            <p>และสั่งเดลิเวอรี่ผ่าน LINE</p>
+        </div>
+
+        <a href="/" class="btn-back">
+            <i class="fas fa-arrow-left"></i>
+            กลับหน้าหลัก
+        </a>
     </div>
 
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/three_bg.js"></script>
+
+    <!-- Anti-Inspect Protection -->
+    <script>
+        document.addEventListener('contextmenu', e => e.preventDefault());
+        document.onkeydown = function (e) {
+            if (e.keyCode == 123 || (e.ctrlKey && e.shiftKey && (e.keyCode == 73 || e.keyCode == 74 || e.keyCode == 67)) || (e.ctrlKey && e.keyCode == 85)) {
+                return false;
+            }
+        };
+    </script>
 </body>
 
 </html>

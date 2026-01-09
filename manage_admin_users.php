@@ -10,7 +10,7 @@ if (!requireAdminLogin()) {
     exit;
 }
 
-require_once 'db.php';
+require_once 'db_config.php';
 
 // จัดการ Actions
 $message = '';

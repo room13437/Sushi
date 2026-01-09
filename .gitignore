@@ -1,23 +1,21 @@
-# Environment variables
-.env
+# Database context
+db_config.php
+database.sql
 
-# IDE files
+# Backups and archives
+*.rar
+*.zip
+*.7z
+
+# User uploads
+uploads/
+video/Sushi.mp4
+
+# Temporary and log files
+visitor_count.txt
+error_log
 .vscode/
-.idea/
 
-# OS files
+# System files
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
-error_log
-
-# Temporary files
-*.tmp
-*.temp
-~*
-
-# Uploaded files (if any)
-uploads/
-*.uploaded
